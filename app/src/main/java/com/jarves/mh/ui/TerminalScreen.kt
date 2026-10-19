@@ -1,25 +1,24 @@
 package com.jarves.mh.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -27,16 +26,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowForward
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AssistChip
@@ -60,35 +61,56 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.res.stringResource
 import com.jarves.mh.R
+import com.jarves.mh.model.ActiveProcessInfo
+import com.jarves.mh.model.BroadcastScope
+import com.jarves.mh.model.QuickCommand
+import com.jarves.mh.model.TerminalFontFamily
+import com.jarves.mh.model.TerminalOutputLine
+import com.jarves.mh.model.TerminalProfile
+import com.jarves.mh.model.TerminalSession
+import com.jarves.mh.model.TerminalSkinConfig
+import com.jarves.mh.model.TerminalSkinStyle
 import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketOrange
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+private const val ASCII_BANNER = """
+ __  __       _     _ _        _    _                                
+|  \/  |     | |   (_) |      | |  | |                               
+| \  / | ___ | |__  _| | ___  | |__| | __ _ _ __ _ __   ___  ___ ___ 
+| |\/| |/ _ \| '_ \| | |/ _ \ |  __  |/ _` | '__| '_ \ / _ \/ __/ __|
+| |  | | (_) | |_) | | |  __/ | |  | | (_| | |  | | | |  __/\__ \__ \
+|_|  |_|\___/|_.__/|_|_|\___| |_|  |_|\__,_|_|  |_| |_|\___||___/___/
+[Mobile Harness Multi-Session Developer Terminal Workstation]
+"""
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,8 +121,8 @@ fun TerminalScreen(
     onInput: (String) -> Unit = {},
     onInterrupt: (() -> Unit)? = null,
     onClear: () -> Unit,
-    onToggleTheme: () -> Unit,
-    themeMode: AppThemeMode,
+    onToggleTheme: () -> Unit = {},
+    themeMode: AppThemeMode = AppThemeMode.DARK,
     title: String = stringResource(R.string.ws_terminal_linux_title),
     subtitle: String = stringResource(R.string.ws_terminal_linux_subtitle),
     liveOutput: String = "",
@@ -110,8 +132,32 @@ fun TerminalScreen(
     promptPath: String = "/workspace",
     onStop: (() -> Unit)? = null,
     showThemeAction: Boolean = false,
-    showQuickCommands: Boolean = true,
+    showQuickCommands: Boolean = false,
     compactHeader: Boolean = false,
+    // Multi-Session & Customization enhancements
+    sessions: List<TerminalSession> = emptyList(),
+    activeSessionId: String = "",
+    onSelectSession: (String) -> Unit = {},
+    onNewSession: () -> Unit = {},
+    onCloseSession: (String) -> Unit = {},
+    onRenameSession: (String, String) -> Unit = { _, _ -> },
+    isSplitEnabled: Boolean = false,
+    onToggleSplit: () -> Unit = {},
+    splitSession: TerminalSession? = null,
+    onBroadcastCommand: (String, BroadcastScope) -> Unit = { _, _ -> },
+    onStopAll: () -> Unit = {},
+    onClearAll: () -> Unit = {},
+    quickCommandsList: List<QuickCommand> = emptyList(),
+    onAddQuickCommand: () -> Unit = {},
+    skinConfig: TerminalSkinConfig = TerminalSkinConfig(),
+    onUpdateSkin: (TerminalSkinConfig) -> Unit = {},
+    profiles: List<TerminalProfile> = emptyList(),
+    onAddProfile: (TerminalProfile) -> Unit = {},
+    onDeleteProfile: (String) -> Unit = {},
+    onResetProfile: (String) -> Unit = {},
+    activeProcesses: List<ActiveProcessInfo> = emptyList(),
+    onRefreshProcesses: () -> Unit = {},
+    onTalkToAgent: (String) -> Unit = {},
 ) {
     var commandInput by remember { mutableStateOf(TextFieldValue()) }
     var commandHistory by remember { mutableStateOf(emptyList<String>()) }
@@ -123,7 +169,11 @@ fun TerminalScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val scope = rememberCoroutineScope()
-    val terminalPromptPath = if (promptPath == "/workspace") "~" else "~${promptPath.removePrefix("/workspace")}" 
+    val terminalPromptPath = if (promptPath == "/workspace") "~" else "~${promptPath.removePrefix("/workspace")}"
+
+    var showSettingsModal by remember { mutableStateOf(false) }
+    var showProcessModal by remember { mutableStateOf(false) }
+
     val openTerminalKeyboard = {
         inputFocusRequester.requestFocus()
         scope.launch {
@@ -153,114 +203,114 @@ fun TerminalScreen(
         }
     }
 
-    // Auto-scroll to bottom whenever scrollable content grows
     LaunchedEffect(Unit) {
         snapshotFlow { terminalScrollState.maxValue }
             .collect { maxValue ->
                 terminalScrollState.scrollTo(maxValue)
             }
     }
-    // Also trigger scroll when key state changes (e.g. isRunning toggling)
     LaunchedEffect(lines.size, isRunning, commandInput.text.length) {
         delay(100)
         terminalScrollState.scrollTo(terminalScrollState.maxValue)
     }
 
-    val quickCommands = listOf(
-        "uname -a",
-        "ls -la",
-        "pwd",
-        "node -v",
-        "python3 --version",
-        "df -h",
-        "free -m",
-        "claude --version",
-    )
+    val isDark = when (themeMode) {
+        AppThemeMode.DARK -> true
+        AppThemeMode.LIGHT -> false
+        AppThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+
+    // Determine Skin styling colors
+    val (terminalBg, promptColor, commandTextColor, outputTextColor, frameBorderColor) = when (skinConfig.style) {
+        TerminalSkinStyle.MATRIX -> listOf(
+            Color(0xFF040A05),
+            Color(0xFF00FF66),
+            Color(0xFF00FF66),
+            Color(0xFF80FFB0),
+            Color(0xFF00FF66).copy(alpha = 0.45f)
+        )
+        TerminalSkinStyle.CYBERPUNK -> listOf(
+            Color(0xFF0D0616),
+            Color(0xFFE879F9),
+            Color(0xFFFDE047),
+            Color(0xFFF1F5F9),
+            Color(0xFFE879F9).copy(alpha = 0.5f)
+        )
+        TerminalSkinStyle.GLASS -> listOf(
+            Color(0xFF111726).copy(alpha = 0.92f),
+            Color(0xFF38BDF8),
+            Color(0xFFF8FAFC),
+            Color(0xFFCBD5E1),
+            Color(0xFF38BDF8).copy(alpha = 0.4f)
+        )
+        TerminalSkinStyle.CRT -> listOf(
+            Color(0xFF140B04),
+            Color(0xFFFFB000),
+            Color(0xFFFFCC00),
+            Color(0xFFFFD54F),
+            Color(0xFFFFB000).copy(alpha = 0.45f)
+        )
+        TerminalSkinStyle.MINIMAL -> listOf(
+            if (isDark) Color(0xFF090D14) else Color(0xFFF6F8FA),
+            if (isDark) PocketGreen else Color(0xFF0D7A3E),
+            if (isDark) Color(0xFFF0F6FC) else MaterialTheme.colorScheme.onSurface,
+            if (isDark) Color(0xFFC9D1D9) else MaterialTheme.colorScheme.onSurface,
+            if (isDark) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant
+        )
+    }
+
+    val selectedFontFamily = when (skinConfig.fontFamily) {
+        TerminalFontFamily.MONOSPACE, TerminalFontFamily.CODE -> FontFamily.Monospace
+        TerminalFontFamily.SANS -> FontFamily.SansSerif
+    }
 
     Scaffold(
         modifier = if (compactHeader) Modifier else Modifier.statusBarsPadding(),
         topBar = {
-            if (compactHeader) {
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(PocketOrange.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Default.Terminal, contentDescription = null, tint = PocketOrange, modifier = Modifier.size(18.dp))
-                        }
-                        Spacer(Modifier.width(11.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text(subtitle, fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        IconButton(onClick = onClear, modifier = Modifier.size(38.dp)) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = stringResource(R.string.ws_terminal_clear_output), modifier = Modifier.size(20.dp))
-                        }
-                        if (showThemeAction) {
-                            IconButton(onClick = onToggleTheme) {
-                                Icon(
-                                    if (themeMode == AppThemeMode.DARK) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                    contentDescription = stringResource(R.string.theme_toggle),
-                                )
+            Column {
+                if (sessions.isNotEmpty()) {
+                    TerminalTabBar(
+                        sessions = sessions,
+                        activeSessionId = activeSessionId,
+                        onSelectSession = onSelectSession,
+                        onNewSession = onNewSession,
+                        onCloseSession = onCloseSession,
+                        onRenameSession = onRenameSession,
+                        isSplitEnabled = isSplitEnabled,
+                        onToggleSplit = onToggleSplit,
+                        onOpenSettings = { showSettingsModal = true },
+                        onOpenProcessManager = {
+                            onRefreshProcesses()
+                            showProcessModal = true
+                        },
+                    )
+                } else if (!compactHeader) {
+                    TopAppBar(
+                        title = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(9.dp)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Default.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Column {
+                                    Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                    Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
-                        }
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f))
+                        },
+                        actions = {
+                            IconButton(onClick = onClear) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = stringResource(R.string.ws_terminal_clear_output))
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                    )
                 }
-            } else {
-                TopAppBar(
-                    modifier = Modifier.padding(top = 8.dp),
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .background(
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                        shape = RoundedCornerShape(9.dp),
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.32f),
-                                        shape = RoundedCornerShape(9.dp),
-                                    ),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Terminal,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(17.dp),
-                                )
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                                Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = onClear) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = stringResource(R.string.ws_terminal_clear_output))
-                        }
-                        if (showThemeAction) {
-                            IconButton(onClick = onToggleTheme) {
-                                Icon(
-                                    if (themeMode == AppThemeMode.DARK) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                    contentDescription = stringResource(R.string.theme_toggle),
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-                )
             }
         },
     ) { padding ->
@@ -270,114 +320,161 @@ fun TerminalScreen(
                 .padding(padding)
                 .then(if (compactHeader) Modifier else Modifier.imePadding()),
         ) {
-            if (showQuickCommands && !keyboardVisible) {
-                // Quick command chips are useful in the standalone terminal, but
-                // project terminal space is reserved for the actual project session.
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    quickCommands.forEach { cmd ->
-                        AssistChip(
-                            onClick = { onRun(cmd) },
-                            label = {
-                                Text(
-                                    cmd,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                )
-                            },
-                        )
-                    }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-            }
-
-            val isDark = when (themeMode) {
-                AppThemeMode.DARK -> true
-                AppThemeMode.LIGHT -> false
-                AppThemeMode.SYSTEM -> isSystemInDarkTheme()
-            }
-            // Neutral console background in light mode; the theme surface is tinted orange.
-            val terminalBg = if (isDark) Color(0xFF090D14) else Color(0xFFF6F8FA)
-            val promptGreen = if (isDark) PocketGreen else Color(0xFF0D7A3E)
-            val commandTextColor = if (isDark) Color(0xFFF0F6FC) else MaterialTheme.colorScheme.onSurface
-            val outputTextColor = if (isDark) Color(0xFFC9D1D9) else MaterialTheme.colorScheme.onSurface
-            val emptyStateColor = if (isDark) Color(0xFF6E7681) else MaterialTheme.colorScheme.onSurfaceVariant
-
-            // Console output area
-            Surface(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-                    .border(1.dp, if (isDark) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
-                color = terminalBg,
-                shape = RoundedCornerShape(12.dp),
-            ) {
+            // Main Output Area (or Split View)
+            if (isSplitEnabled && splitSession != null) {
+                // Dual Pane Split View
                 Column(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(terminalScrollState)
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    SelectionContainer {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (lines.isEmpty()) {
-                                Text(
-                                    stringResource(R.string.workspace_terminal_ready),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    color = emptyStateColor,
-                                )
-                            }
-
-                            lines.forEach { item ->
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    TerminalCommandPrompt(promptPath = terminalPromptPath, command = item.command, isDark = isDark)
-                                    if (item.output.isNotEmpty()) {
-                                        Text(
-                                            text = sanitizeTerminalOutput(item.output),
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 12.sp,
-                                            lineHeight = 18.sp,
-                                            color = if (item.exitCode != 0) MaterialTheme.colorScheme.error else outputTextColor,
-                                            modifier = Modifier.padding(start = 8.dp),
-                                        )
-                                    }
+                    // Pane 1: Active Session
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .border(1.dp, frameBorderColor, RoundedCornerShape(10.dp)),
+                        color = terminalBg,
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(terminalScrollState)
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text("Pane 1: Active Session", fontSize = 10.sp, color = promptColor, fontWeight = FontWeight.Bold)
+                            for (item in lines.takeLast(30)) {
+                                TerminalCommandPrompt(promptPath = terminalPromptPath, command = item.command, isDark = isDark)
+                                if (item.output.isNotEmpty()) {
+                                    Text(
+                                        text = sanitizeTerminalOutput(item.output),
+                                        fontFamily = selectedFontFamily,
+                                        fontSize = skinConfig.fontSizeSp.sp,
+                                        color = if (item.exitCode != 0) MaterialTheme.colorScheme.error else outputTextColor,
+                                    )
                                 }
                             }
-
-                            if (isRunning && currentCommand != null) {
-                                TerminalCommandPrompt(promptPath = terminalPromptPath, command = currentCommand, isDark = isDark)
-                            }
-
                             if (liveOutput.isNotBlank()) {
-                                Text(
-                                    sanitizeTerminalOutput(liveOutput),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    lineHeight = 18.sp,
-                                    color = outputTextColor,
-                                )
+                                Text(sanitizeTerminalOutput(liveOutput), fontFamily = selectedFontFamily, fontSize = skinConfig.fontSizeSp.sp, color = outputTextColor)
                             }
-
                         }
                     }
-                    run {
-                        // While a process is running, keep the input surface visually
-                        // empty until the user types. A permanent prompt/cursor here
-                        // changed the console height and made auto-scroll look like a
-                        // full terminal refresh on every blink.
+
+                    // Pane 2: Split Session
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+                        color = terminalBg,
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text("Pane 2: ${splitSession.name} (${splitSession.cwd})", fontSize = 10.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
+                            for (item in splitSession.lines.takeLast(30)) {
+                                TerminalCommandPrompt(promptPath = splitSession.cwd, command = item.command, isDark = isDark)
+                                if (item.output.isNotEmpty()) {
+                                    Text(
+                                        text = sanitizeTerminalOutput(item.output),
+                                        fontFamily = selectedFontFamily,
+                                        fontSize = skinConfig.fontSizeSp.sp,
+                                        color = if (item.exitCode != 0) MaterialTheme.colorScheme.error else outputTextColor,
+                                    )
+                                }
+                            }
+                            if (splitSession.liveOutput.isNotBlank()) {
+                                Text(sanitizeTerminalOutput(splitSession.liveOutput), fontFamily = selectedFontFamily, fontSize = skinConfig.fontSizeSp.sp, color = outputTextColor)
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Single Pane Console View
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .border(1.dp, frameBorderColor, RoundedCornerShape(12.dp)),
+                    color = terminalBg,
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(terminalScrollState)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        SelectionContainer {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (lines.isEmpty()) {
+                                    if (skinConfig.showAsciiBanner) {
+                                        Text(
+                                            text = skinConfig.customBannerText ?: ASCII_BANNER,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.sp,
+                                            lineHeight = 11.sp,
+                                            color = promptColor.copy(alpha = 0.85f),
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                    Text(
+                                        stringResource(R.string.workspace_terminal_ready),
+                                        fontFamily = selectedFontFamily,
+                                        fontSize = skinConfig.fontSizeSp.sp,
+                                        color = outputTextColor.copy(alpha = 0.6f),
+                                    )
+                                }
+
+                                for (item in lines) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        TerminalCommandPrompt(promptPath = terminalPromptPath, command = item.command, isDark = isDark)
+                                        if (item.output.isNotEmpty()) {
+                                            Text(
+                                                text = sanitizeTerminalOutput(item.output),
+                                                fontFamily = selectedFontFamily,
+                                                fontSize = skinConfig.fontSizeSp.sp,
+                                                lineHeight = skinConfig.lineHeightSp.sp,
+                                                color = if (item.exitCode != 0) MaterialTheme.colorScheme.error else outputTextColor,
+                                                modifier = Modifier.padding(start = 8.dp),
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (isRunning && currentCommand != null) {
+                                    TerminalCommandPrompt(promptPath = terminalPromptPath, command = currentCommand, isDark = isDark)
+                                }
+
+                                if (liveOutput.isNotBlank()) {
+                                    Text(
+                                        sanitizeTerminalOutput(liveOutput),
+                                        fontFamily = selectedFontFamily,
+                                        fontSize = skinConfig.fontSizeSp.sp,
+                                        lineHeight = skinConfig.lineHeightSp.sp,
+                                        color = outputTextColor,
+                                    )
+                                }
+                            }
+                        }
+
+                        // Terminal inline prompt input
                         val prefix = if (isRunning) "" else "root@pocket:$terminalPromptPath# "
                         val prefixVisualTransformation = remember(prefix, isDark) {
                             VisualTransformation { text ->
                                 val transformed = buildAnnotatedString {
-                                    withStyle(SpanStyle(color = promptGreen, fontWeight = FontWeight.Bold)) {
+                                    withStyle(SpanStyle(color = promptColor, fontWeight = FontWeight.Bold)) {
                                         append(prefix)
                                     }
                                     withStyle(SpanStyle(color = commandTextColor, fontWeight = FontWeight.SemiBold)) {
@@ -403,18 +500,31 @@ fun TerminalScreen(
                                         commandInput.selection.start.coerceAtMost(next.text.length),
                                         next.selection.end.coerceAtMost(next.text.length),
                                     )
-                                    if (inserted.any { it.equals('c', ignoreCase = true) }) {
-                                        if (isRunning) {
-                                            onInterrupt?.invoke()
-                                        } else {
-                                            // A shell with no foreground process uses
-                                            // Ctrl+C to cancel the current command line.
-                                            commandInput = TextFieldValue()
+                                    when {
+                                        inserted.any { it.equals('c', ignoreCase = true) } -> {
+                                            if (isRunning) onInterrupt?.invoke() else commandInput = TextFieldValue()
+                                            ctrlActive = false
                                         }
-                                        ctrlActive = false
-                                    } else {
-                                        commandInput = next
-                                        ctrlActive = false
+                                        inserted.any { it.equals('d', ignoreCase = true) } -> {
+                                            if (isRunning) onInput("\u0004") else onRun("exit")
+                                            ctrlActive = false
+                                        }
+                                        inserted.any { it.equals('l', ignoreCase = true) } -> {
+                                            onClear()
+                                            ctrlActive = false
+                                        }
+                                        inserted.any { it.equals('z', ignoreCase = true) } -> {
+                                            onStop?.invoke()
+                                            ctrlActive = false
+                                        }
+                                        inserted.any { it.equals('u', ignoreCase = true) } -> {
+                                            commandInput = TextFieldValue()
+                                            ctrlActive = false
+                                        }
+                                        else -> {
+                                            commandInput = next
+                                            ctrlActive = false
+                                        }
                                     }
                                 } else {
                                     commandInput = next
@@ -425,11 +535,11 @@ fun TerminalScreen(
                                 .focusRequester(inputFocusRequester),
                             singleLine = false,
                             visualTransformation = prefixVisualTransformation,
-                            cursorBrush = SolidColor(promptGreen),
+                            cursorBrush = SolidColor(promptColor),
                             textStyle = androidx.compose.ui.text.TextStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                lineHeight = 18.sp,
+                                fontFamily = selectedFontFamily,
+                                fontSize = skinConfig.fontSizeSp.sp,
+                                lineHeight = skinConfig.lineHeightSp.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = commandTextColor,
                             ),
@@ -440,49 +550,99 @@ fun TerminalScreen(
                                 onGo = { submitCommand() },
                             ),
                         )
+                        Spacer(Modifier.height(12.dp))
                     }
-                    Spacer(Modifier.height(24.dp))
                 }
             }
 
-            // Keyboard helper row. These operate on the command draft, so they are
-            // useful even when the phone keyboard does not expose terminal keys.
-            if (!keyboardVisible) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 14.dp)
-                        .padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    TerminalKeyButton("↑", stringResource(R.string.ws_terminal_previous_command)) {
-                        commandHistory.getOrNull(if (historyIndex < 0) commandHistory.lastIndex else (historyIndex - 1).coerceAtLeast(0))?.let {
-                            historyIndex = if (historyIndex < 0) commandHistory.lastIndex else (historyIndex - 1).coerceAtLeast(0)
-                            commandInput = TextFieldValue(it, TextRange(it.length))
-                        }
-                    }
-                    TerminalKeyButton("↓", stringResource(R.string.ws_terminal_next_command)) {
-                        if (historyIndex >= 0) {
-                            historyIndex = (historyIndex + 1).takeIf { it < commandHistory.size } ?: -1
-                            commandInput = TextFieldValue(commandHistory.getOrNull(historyIndex) ?: "", TextRange((commandHistory.getOrNull(historyIndex) ?: "").length))
-                        }
-                    }
-                    TerminalIconKeyButton(Icons.Default.ArrowBack, stringResource(R.string.ws_terminal_cursor_left)) {
-                        commandInput = commandInput.copy(selection = TextRange((commandInput.selection.start - 1).coerceAtLeast(0)))
-                    }
-                    TerminalIconKeyButton(Icons.Default.ArrowForward, stringResource(R.string.ws_terminal_cursor_right)) {
-                        commandInput = commandInput.copy(selection = TextRange((commandInput.selection.end + 1).coerceAtMost(commandInput.text.length)))
-                    }
-                    TerminalKeyButton("ALT", stringResource(R.string.ws_terminal_alt_modifier), active = altActive, fixedWidth = true) { altActive = !altActive }
-                    TerminalKeyButton("ESC", stringResource(R.string.ws_terminal_escape)) { commandInput = TextFieldValue() }
-                    TerminalKeyButton("CTRL", stringResource(R.string.ws_terminal_ctrl_modifier), active = ctrlActive, fixedWidth = true) {
-                        ctrlActive = !ctrlActive
-                        if (ctrlActive) openTerminalKeyboard()
+            // Mobile Terminal Key Toolbar (Ctrl, Alt, Tab, arrows)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TerminalKeyButton("Ctrl+C", stringResource(R.string.ws_terminal_ctrl_c)) {
+                    if (isRunning) onInterrupt?.invoke() else commandInput = TextFieldValue()
+                }
+                TerminalKeyButton("Ctrl+D", "EOF / Exit") {
+                    if (isRunning) onInput("\u0004") else onRun("exit")
+                }
+                TerminalKeyButton("Ctrl+Z", "Suspend") {
+                    onStop?.invoke()
+                }
+                TerminalKeyButton("Tab", "Autocomplete") {
+                    if (isRunning) {
+                        onInput("\t")
+                    } else {
+                        commandInput = commandInput.copy(
+                            text = commandInput.text + "    ",
+                            selection = TextRange(commandInput.text.length + 4),
+                        )
                     }
                 }
+                TerminalKeyButton("CTRL", stringResource(R.string.ws_terminal_ctrl_modifier), active = ctrlActive, fixedWidth = true) {
+                    ctrlActive = !ctrlActive
+                    if (ctrlActive) openTerminalKeyboard()
+                }
+                TerminalKeyButton("ESC", stringResource(R.string.ws_terminal_escape)) { commandInput = TextFieldValue() }
+                TerminalKeyButton("↑", stringResource(R.string.ws_terminal_previous_command)) {
+                    commandHistory.getOrNull(if (historyIndex < 0) commandHistory.lastIndex else (historyIndex - 1).coerceAtLeast(0))?.let {
+                        historyIndex = if (historyIndex < 0) commandHistory.lastIndex else (historyIndex - 1).coerceAtLeast(0)
+                        commandInput = TextFieldValue(it, TextRange(it.length))
+                    }
+                }
+                TerminalKeyButton("↓", stringResource(R.string.ws_terminal_next_command)) {
+                    if (historyIndex >= 0) {
+                        historyIndex = (historyIndex + 1).takeIf { it < commandHistory.size } ?: -1
+                        commandInput = TextFieldValue(commandHistory.getOrNull(historyIndex) ?: "", TextRange((commandHistory.getOrNull(historyIndex) ?: "").length))
+                    }
+                }
+                TerminalIconKeyButton(Icons.Default.ArrowBack, stringResource(R.string.ws_terminal_cursor_left)) {
+                    commandInput = commandInput.copy(selection = TextRange((commandInput.selection.start - 1).coerceAtLeast(0)))
+                }
+                TerminalIconKeyButton(Icons.Default.ArrowForward, stringResource(R.string.ws_terminal_cursor_right)) {
+                    commandInput = commandInput.copy(selection = TextRange((commandInput.selection.end + 1).coerceAtMost(commandInput.text.length)))
+                }
+                TerminalKeyButton("ALT", stringResource(R.string.ws_terminal_alt_modifier), active = altActive, fixedWidth = true) { altActive = !altActive }
             }
+
+            // Command Bar with broadcast and agent integration
+            TerminalCommandBar(
+                onRunCommand = onRun,
+                onBroadcastCommand = onBroadcastCommand,
+                onStopAll = onStopAll,
+                onClearAll = onClearAll,
+                quickCommands = quickCommandsList,
+                onAddQuickCommand = onAddQuickCommand,
+                onTalkToAgent = onTalkToAgent,
+                autocorrectEnabled = skinConfig.autocorrectEnabled,
+            )
         }
+    }
+
+    if (showSettingsModal) {
+        TerminalSettingsModalSheet(
+            skinConfig = skinConfig,
+            onUpdateSkin = onUpdateSkin,
+            profiles = profiles,
+            onAddProfile = onAddProfile,
+            onDeleteProfile = onDeleteProfile,
+            onResetProfile = onResetProfile,
+            onDismiss = { showSettingsModal = false },
+        )
+    }
+
+    if (showProcessModal) {
+        ProcessActivityManagerDialog(
+            processes = activeProcesses,
+            terminals = sessions,
+            onClose = { showProcessModal = false },
+            onStopTerminal = { _ -> onStopAll() },
+            onRefresh = onRefreshProcesses,
+        )
     }
 }
 

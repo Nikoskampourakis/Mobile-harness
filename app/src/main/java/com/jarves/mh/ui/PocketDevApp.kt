@@ -131,8 +131,9 @@ private enum class RootScreen(val label: String, val icon: ImageVector) {
 }
 private enum class WorkspaceTab(val icon: ImageVector) {
     CHAT(Icons.Default.ChatBubble),
-    PREVIEW(Icons.Default.Visibility),
+    TERMINAL(Icons.Default.Terminal),
     FILES(Icons.Default.Code),
+    PREVIEW(Icons.Default.Visibility),
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1257,6 +1258,27 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onOpenLogLine = viewModel::openAndroidLogLine,
             onCancelAndroidBuild = viewModel::cancelAndroidBuild,
             onInstallAndroidTools = { viewModel.installDevStack(DevStack.ANDROID, refreshAndroidHealthAfter = true) },
+            onPushToGitHub = viewModel::pushActiveProjectToGitHub,
+            onSubmitClarification = viewModel::submitClarificationAnswers,
+            onDismissClarification = viewModel::dismissClarification,
+            onResumeInterruptedTask = viewModel::resumeInterruptedTask,
+            onDismissInterruptedTask = viewModel::dismissInterruptedTask,
+            onTogglePlanningGoal = viewModel::togglePlanningGoal,
+            onTogglePlanningGoalDetails = viewModel::togglePlanningGoalDetails,
+            onSelectTerminalSession = viewModel::selectTerminalSession,
+            onNewTerminalSession = { viewModel.createTerminalSession() },
+            onCloseTerminalSession = viewModel::closeTerminalSession,
+            onRenameTerminalSession = viewModel::renameTerminalSession,
+            onToggleSplitTerminal = viewModel::toggleSplitTerminalView,
+            onBroadcastTerminalCommand = viewModel::broadcastTerminalCommand,
+            onStopAllTerminals = viewModel::stopAllTerminalSessions,
+            onClearAllTerminals = viewModel::clearAllTerminalSessions,
+            onUpdateTerminalSkin = viewModel::updateTerminalSkin,
+            onAddTerminalProfile = viewModel::addTerminalProfile,
+            onDeleteTerminalProfile = viewModel::deleteTerminalProfile,
+            onResetTerminalProfile = viewModel::resetTerminalProfile,
+            onRefreshProcesses = viewModel::refreshActiveProcesses,
+            onTalkToAgentThroughTerminal = { prompt -> viewModel.talkToAgentThroughTerminal(state.activeTerminalSessionId, prompt) },
         )
         else -> RootScreenHost(
             state,
@@ -3068,6 +3090,14 @@ private fun RootScreenHost(
                     onRefreshDiagnostics = viewModel::refreshDiagnostics,
                     onStopInactiveProcesses = viewModel::stopInactiveProcesses,
                     onClearRuntimeCache = viewModel::clearRuntimeCache,
+                    onSetAiNickname = viewModel::setAiNickname,
+                    onResetAiNickname = viewModel::resetAiNickname,
+                    onSetWakeLockEnabled = viewModel::setWakeLockEnabled,
+                    onSetAutoCollapseSections = viewModel::setAutoCollapseSections,
+                    onSetAskModeEnabled = viewModel::setAskModeEnabled,
+                    onSetConfirmDestructiveCommands = viewModel::setConfirmDestructiveCommands,
+                    onSetConfirmFileDeletion = viewModel::setConfirmFileDeletion,
+                    onSetConfirmGitPush = viewModel::setConfirmGitPush,
                 )
             }
             if (state.ttsIsSpeaking) {
@@ -4874,12 +4904,34 @@ private fun WorkspaceScreen(
     onOpenLogLine: (AndroidLogLine) -> Unit = {},
     onCancelAndroidBuild: () -> Unit = {},
     onInstallAndroidTools: () -> Unit = {},
+    onPushToGitHub: (String, Boolean, Boolean, String) -> Unit = { _, _, _, _ -> },
+    onSubmitClarification: (String, Map<String, String>) -> Unit = { _, _ -> },
+    onDismissClarification: (String) -> Unit = {},
+    onResumeInterruptedTask: () -> Unit = {},
+    onDismissInterruptedTask: () -> Unit = {},
+    onTogglePlanningGoal: (String) -> Unit = {},
+    onTogglePlanningGoalDetails: () -> Unit = {},
+    onSelectTerminalSession: (String) -> Unit = {},
+    onNewTerminalSession: () -> Unit = {},
+    onCloseTerminalSession: (String) -> Unit = {},
+    onRenameTerminalSession: (String, String) -> Unit = { _, _ -> },
+    onToggleSplitTerminal: () -> Unit = {},
+    onBroadcastTerminalCommand: (String, BroadcastScope) -> Unit = { _, _ -> },
+    onStopAllTerminals: () -> Unit = {},
+    onClearAllTerminals: () -> Unit = {},
+    onUpdateTerminalSkin: (TerminalSkinConfig) -> Unit = {},
+    onAddTerminalProfile: (TerminalProfile) -> Unit = {},
+    onDeleteTerminalProfile: (String) -> Unit = {},
+    onResetTerminalProfile: (String) -> Unit = {},
+    onRefreshProcesses: () -> Unit = {},
+    onTalkToAgentThroughTerminal: (String) -> Unit = {},
 ) {
     var showAndroidDashboard by rememberSaveable { mutableStateOf(false) }
     var customizeTarget by remember { mutableStateOf<CustomizeTarget?>(null) }
     var projectPathTarget by remember { mutableStateOf<Project?>(null) }
     var showPermissionsDialog by rememberSaveable { mutableStateOf(false) }
     var showShareDialog by rememberSaveable { mutableStateOf(false) }
+    var showGitPushDialog by rememberSaveable { mutableStateOf(false) }
 
     if (customizeTarget != null) {
         val target = customizeTarget!!
@@ -4948,6 +5000,20 @@ private fun WorkspaceScreen(
             onStopSharing = onStopProjectSharing,
             onRegenerateCode = onRegenerateShareCode,
             onDismiss = { showShareDialog = false },
+        )
+    }
+
+    if (showGitPushDialog && state.activeProject != null) {
+        GitPushDialog(
+            project = state.activeProject,
+            changes = state.changes,
+            githubLogin = state.githubLogin,
+            isPushing = state.gitCloneRunning,
+            pushMessage = state.gitCloneMessage,
+            onDismiss = { showGitPushDialog = false },
+            onPush = { repo, isNew, isPriv, msg ->
+                onPushToGitHub(repo, isNew, isPriv, msg)
+            },
         )
     }
 
@@ -5252,8 +5318,9 @@ private fun WorkspaceScreen(
                                     Text(
                                         text = when (tab) {
                                             WorkspaceTab.CHAT -> "Chat"
-                                            WorkspaceTab.PREVIEW -> "Preview"
+                                            WorkspaceTab.TERMINAL -> "Terminal"
                                             WorkspaceTab.FILES -> "Files"
+                                            WorkspaceTab.PREVIEW -> "Preview"
                                         },
                                         fontSize = 11.sp,
                                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
@@ -5559,6 +5626,29 @@ private fun WorkspaceScreen(
                                 }
                             }
 
+                            // Push to GitHub
+                            Surface(
+                                onClick = {
+                                    showMoreSheet = false
+                                    showGitPushDialog = true
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(Icons.Default.CloudUpload, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                                    Spacer(Modifier.width(14.dp))
+                                    Column {
+                                        Text("Push to GitHub", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                        Text("Commit and push repository without manual zip", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+
                             // Settings
                             Surface(
                                 onClick = {
@@ -5589,107 +5679,171 @@ private fun WorkspaceScreen(
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            if (state.isRefreshing) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
-            when (selectedTab) {
-                WorkspaceTab.CHAT -> ChatTab(
-                    state.messages,
-                    state.pendingApproval,
-                    state.liveProcess,
-                    state.isRunning,
-                    onSend,
-                    onStop,
-                    onApproval,
-                    listState = chatListState,
-                    taskStartedAtMillis = state.workSegmentStartedAtMillis ?: state.taskStartedAtMillis,
-                    taskFinishedAtMillis = state.taskFinishedAtMillis,
-                    thinkingActive = state.liveThinking,
-                    agentKind = state.agentKind,
-                    pendingAttachments = state.pendingAttachments,
-                    onAttach = {
-                        attachmentLauncher.launch(arrayOf("image/*", "text/*", "application/json", "application/xml"))
-                    },
-                    onCamera = {
-                        runCatching {
-                            val cameraDir = File(context.cacheDir, "camera").apply { mkdirs() }
-                            val photoFile = File(cameraDir, "photo_${System.currentTimeMillis()}.jpg")
-                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", photoFile)
-                            cameraPhotoUri = uri
-                            takePictureLauncher.launch(uri)
-                        }.onFailure {
-                            Toast.makeText(context, "Camera unavailable: ${it.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    onRemoveAttachment = onRemoveAttachment,
-                    onOpenAttachment = onOpenAttachment,
-                    onRunInTerminal = { command ->
-                        // selectedTab = WorkspaceTab.TERMINAL // Removed Terminal tab
-                        // onTerminalOpened()
-                        onTerminalPrepare(command)
-                    },
-                    isSpeaking = state.ttsIsSpeaking,
-                    speakingUtteranceId = state.ttsSpeakingUtteranceId,
-                    onToggleSpeakMessage = onToggleSpeakMessage,
-                    onRetryMessage = onRetryMessage,
-                    onForkChat = onForkChat,
-                    onEditMessage = onEditMessage,
-                    onRestoreCheckpoint = onRestoreCheckpoint,
-                    activePlan = state.activePlan,
-                    onApprovePlan = onApprovePlan,
-                    onCancelPlan = onCancelPlan,
-                    permissionMode = state.activeProject?.permissionMode ?: PermissionMode.WAIT_FOR_APPROVAL,
-                    onUpdatePermissionMode = onUpdatePermissionMode,
-                    onOpenPermissionsDialog = { showPermissionsDialog = true },
-                )
-                WorkspaceTab.FILES -> com.jarves.mh.ui.CodeWorkspaceTab(
-                    activeProject = state.activeProject,
-                    files = state.workspaceFiles,
-                    loading = state.filesLoading,
-                    changes = state.changes,
-                    suggestedProjectRoot = state.suggestedProjectRoot,
-                    onRefresh = onRefreshFiles,
-                    onOpenFile = onOpenFile,
-                    onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
-                    onExport = {
-                        exportProjectLauncher.launch("${state.activeProject?.slug ?: "project"}.zip")
-                    },
-                    onUndoChanges = onUndoChanges,
-                    onKeepChanges = onKeepChanges,
-                    onUndoFileChange = onUndoFileChange,
-                    onKeepFileChange = onKeepFileChange,
-                    onPushToGitHub = { repo, isNew, isPriv, msg ->
-                        // Implement via ViewModel if needed
-                    },
-                    githubConnected = state.githubLogin != null,
-                    githubRepositories = state.githubRepositories,
-                    terminalScreen = {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            PlanningModeTopBar(
+                goals = state.planningGoals,
+                onToggleGoal = onTogglePlanningGoal,
+                showDetails = state.showPlanningGoalDetails,
+                onToggleDetails = onTogglePlanningGoalDetails,
+            )
+
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (state.isRefreshing) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                when (selectedTab) {
+                    WorkspaceTab.CHAT -> ChatTab(
+                        state.messages,
+                        state.pendingApproval,
+                        state.liveProcess,
+                        state.isRunning,
+                        onSend,
+                        onStop,
+                        onApproval,
+                        listState = chatListState,
+                        taskStartedAtMillis = state.workSegmentStartedAtMillis ?: state.taskStartedAtMillis,
+                        taskFinishedAtMillis = state.taskFinishedAtMillis,
+                        thinkingActive = state.liveThinking,
+                        agentKind = state.agentKind,
+                        pendingAttachments = state.pendingAttachments,
+                        onAttach = {
+                            attachmentLauncher.launch(arrayOf("image/*", "text/*", "application/json", "application/xml"))
+                        },
+                        onCamera = {
+                            runCatching {
+                                val cameraDir = File(context.cacheDir, "camera").apply { mkdirs() }
+                                val photoFile = File(cameraDir, "photo_${System.currentTimeMillis()}.jpg")
+                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", photoFile)
+                                cameraPhotoUri = uri
+                                takePictureLauncher.launch(uri)
+                            }.onFailure {
+                                Toast.makeText(context, "Camera unavailable: ${it.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onRemoveAttachment = onRemoveAttachment,
+                        onOpenAttachment = onOpenAttachment,
+                        onRunInTerminal = { command ->
+                            selectedTab = WorkspaceTab.TERMINAL
+                            onTerminalOpened()
+                            onTerminalPrepare(command)
+                        },
+                        isSpeaking = state.ttsIsSpeaking,
+                        speakingUtteranceId = state.ttsSpeakingUtteranceId,
+                        onToggleSpeakMessage = onToggleSpeakMessage,
+                        onRetryMessage = onRetryMessage,
+                        onForkChat = onForkChat,
+                        onEditMessage = onEditMessage,
+                        onRestoreCheckpoint = onRestoreCheckpoint,
+                        activePlan = state.activePlan,
+                        onApprovePlan = onApprovePlan,
+                        onCancelPlan = onCancelPlan,
+                        permissionMode = state.activeProject?.permissionMode ?: PermissionMode.WAIT_FOR_APPROVAL,
+                        onUpdatePermissionMode = onUpdatePermissionMode,
+                        onOpenPermissionsDialog = { showPermissionsDialog = true },
+                        pendingClarification = state.pendingClarification,
+                        onClarificationSubmit = onSubmitClarification,
+                        onClarificationDismiss = onDismissClarification,
+                        aiNickname = state.aiNickname,
+                        autoCollapseSections = state.autoCollapseSections,
+                        interruptedTaskPrompt = state.interruptedTaskPrompt,
+                        onResumeInterruptedTask = onResumeInterruptedTask,
+                        onDismissInterruptedTask = onDismissInterruptedTask,
+                    )
+                    WorkspaceTab.TERMINAL -> {
+                        val activeSession = state.terminalSessions.firstOrNull { it.id == state.activeTerminalSessionId } ?: state.terminalSessions.firstOrNull()
+                        val splitSession = state.terminalSessions.firstOrNull { it.id == state.splitTerminalSessionId }
                         TerminalScreen(
-                            lines = state.projectTerminalLines,
-                            isRunning = state.projectTerminalRunning,
+                            lines = activeSession?.lines ?: state.projectTerminalLines,
+                            isRunning = activeSession?.isRunning ?: state.projectTerminalRunning,
                             onRun = onTerminalRun,
                             onInput = onTerminalInput,
                             onInterrupt = onTerminalInterrupt,
                             onClear = onTerminalClear,
                             onToggleTheme = {},
                             themeMode = state.themeMode,
-                            title = "Project Terminal",
-                            subtitle = "${state.projectTerminalCwd} · Ubuntu PRoot",
-                            liveOutput = state.projectTerminalLiveOutput,
-                            currentCommand = state.projectTerminalCommand,
+                            title = activeSession?.name ?: "Project Terminal",
+                            subtitle = "${activeSession?.cwd ?: state.projectTerminalCwd} · Ubuntu PRoot",
+                            liveOutput = activeSession?.liveOutput ?: state.projectTerminalLiveOutput,
+                            currentCommand = activeSession?.command ?: state.projectTerminalCommand,
                             commandDraft = state.projectTerminalDraft,
                             onCommandDraftConsumed = onTerminalDraftConsumed,
-                            promptPath = state.projectTerminalCwd,
+                            promptPath = activeSession?.cwd ?: state.projectTerminalCwd,
                             onStop = onTerminalStop,
-                            showThemeAction = false,
-                            showQuickCommands = false,
                             compactHeader = true,
+                            sessions = state.terminalSessions,
+                            activeSessionId = state.activeTerminalSessionId,
+                            onSelectSession = onSelectTerminalSession,
+                            onNewSession = onNewTerminalSession,
+                            onCloseSession = onCloseTerminalSession,
+                            onRenameSession = onRenameTerminalSession,
+                            isSplitEnabled = state.isSplitTerminalEnabled,
+                            onToggleSplit = onToggleSplitTerminal,
+                            splitSession = splitSession,
+                            onBroadcastCommand = onBroadcastTerminalCommand,
+                            onStopAll = onStopAllTerminals,
+                            onClearAll = onClearAllTerminals,
+                            quickCommandsList = state.quickCommands,
+                            onAddQuickCommand = {},
+                            skinConfig = state.terminalSkin,
+                            onUpdateSkin = onUpdateTerminalSkin,
+                            profiles = state.terminalProfiles,
+                            onAddProfile = onAddTerminalProfile,
+                            onDeleteProfile = onDeleteTerminalProfile,
+                            onResetProfile = onResetTerminalProfile,
+                            activeProcesses = state.activeProcesses,
+                            onRefreshProcesses = onRefreshProcesses,
+                            onTalkToAgent = onTalkToAgentThroughTerminal,
                         )
                     }
-                )
-                WorkspaceTab.PREVIEW -> PreviewTab(state.previewReady, state.previewUrl)
-            }
+                    WorkspaceTab.FILES -> com.jarves.mh.ui.CodeWorkspaceTab(
+                        activeProject = state.activeProject,
+                        files = state.workspaceFiles,
+                        loading = state.filesLoading,
+                        changes = state.changes,
+                        suggestedProjectRoot = state.suggestedProjectRoot,
+                        onRefresh = onRefreshFiles,
+                        onOpenFile = onOpenFile,
+                        onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
+                        onExport = {
+                            exportProjectLauncher.launch("${state.activeProject?.slug ?: "project"}.zip")
+                        },
+                        onUndoChanges = onUndoChanges,
+                        onKeepChanges = onKeepChanges,
+                        onUndoFileChange = onUndoFileChange,
+                        onKeepFileChange = onKeepFileChange,
+                        onPushToGitHub = onPushToGitHub,
+                        githubConnected = state.githubLogin != null,
+                        githubRepositories = state.githubRepositories,
+                        terminalScreen = {
+                            TerminalScreen(
+                                lines = state.projectTerminalLines,
+                                isRunning = state.projectTerminalRunning,
+                                onRun = onTerminalRun,
+                                onInput = onTerminalInput,
+                                onInterrupt = onTerminalInterrupt,
+                                onClear = onTerminalClear,
+                                onToggleTheme = {},
+                                themeMode = state.themeMode,
+                                title = "Project Terminal",
+                                subtitle = "${state.projectTerminalCwd} · Ubuntu PRoot",
+                                liveOutput = state.projectTerminalLiveOutput,
+                                currentCommand = state.projectTerminalCommand,
+                                commandDraft = state.projectTerminalDraft,
+                                onCommandDraftConsumed = onTerminalDraftConsumed,
+                                promptPath = state.projectTerminalCwd,
+                                onStop = onTerminalStop,
+                                showThemeAction = false,
+                                showQuickCommands = false,
+                                compactHeader = true,
+                            )
+                        }
+                    )
+                    WorkspaceTab.PREVIEW -> PreviewTab(state.previewReady, state.previewUrl)
+                }
             if (state.ttsIsSpeaking) {
                 Surface(
                     modifier = Modifier
@@ -5730,6 +5884,7 @@ private fun WorkspaceScreen(
             }
         }
     }
+}
 }
 
 @Composable
@@ -6191,9 +6346,18 @@ private fun ChatTab(
     permissionMode: PermissionMode = PermissionMode.WAIT_FOR_APPROVAL,
     onUpdatePermissionMode: (PermissionMode) -> Unit = {},
     onOpenPermissionsDialog: () -> Unit = {},
+    pendingClarification: AskRequest? = null,
+    onClarificationSubmit: (String, Map<String, String>) -> Unit = { _, _ -> },
+    onClarificationDismiss: (String) -> Unit = {},
+    aiNickname: String = "",
+    autoCollapseSections: Boolean = true,
+    interruptedTaskPrompt: String? = null,
+    onResumeInterruptedTask: () -> Unit = {},
+    onDismissInterruptedTask: () -> Unit = {},
 ) {
     val view = LocalView.current
     val context = LocalContext.current
+    val displayName = aiNickname.ifBlank { agentKind.title }
     // Keep the screen on while the selected agent is working in this chat. Released automatically
     // when the task finishes or the user leaves the chat tab.
     DisposableEffect(isRunning, isSpeaking) {
@@ -6220,7 +6384,7 @@ private fun ChatTab(
         if (isGranted) {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to ${agentKind.title}…")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to $displayName…")
             }
             runCatching {
                 speechLauncher.launch(intent)
@@ -6240,7 +6404,7 @@ private fun ChatTab(
         if (hasPermission) {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to ${agentKind.title}…")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to $displayName…")
             }
             runCatching {
                 speechLauncher.launch(intent)
@@ -6266,6 +6430,31 @@ private fun ChatTab(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                interruptedTaskPrompt?.let { promptText ->
+                    item(key = "interrupted-task-prompt-banner") {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Icon(Icons.Default.Restore, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Column(Modifier.weight(1f)) {
+                                    Text("Interrupted task detected", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Text(promptText.take(80) + if (promptText.length > 80) "…" else "", fontSize = 11.sp, maxLines = 1)
+                                }
+                                TextButton(onClick = onResumeInterruptedTask) { Text("Resume") }
+                                IconButton(onClick = onDismissInterruptedTask, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Close, contentDescription = "Dismiss", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                }
                 items(messages, key = { it.id }) { message ->
                     if (message.workItems.isNotEmpty()) {
                         WorkBlockCard(message)
@@ -6292,10 +6481,20 @@ private fun ChatTab(
                             startedAtMillis = taskStartedAtMillis,
                             finishedAtMillis = taskFinishedAtMillis,
                             thinkingActive = thinkingActive,
+                            autoCollapseOnFinish = autoCollapseSections,
                         )
                     }
                 }
                 approval?.let { request -> item { ApprovalCard(request, onApproval) } }
+                pendingClarification?.let { req ->
+                    item(key = "clarification-${req.id}") {
+                        AskClarificationCard(
+                            request = req,
+                            onSubmit = { answers -> onClarificationSubmit(req.id, answers) },
+                            onDismiss = { onClarificationDismiss(req.id) },
+                        )
+                    }
+                }
                 activePlan?.let { plan ->
                     item(key = "active-execution-plan") {
                         ExecutionPlanCard(
@@ -6597,7 +6796,7 @@ private fun ChatTab(
                                     Box(contentAlignment = Alignment.CenterStart) {
                                         if (prompt.isEmpty()) {
                                             Text(
-                                                text = "Message ${agentKind.title}…",
+                                                text = "Message $displayName…",
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 fontSize = 16.sp,
                                             )
@@ -6686,12 +6885,14 @@ private fun LiveClaudeProcess(
     startedAtMillis: Long?,
     finishedAtMillis: Long?,
     thinkingActive: Boolean,
+    autoCollapseOnFinish: Boolean = true,
 ) {
     val elapsedSeconds = startedAtMillis?.let { rememberLiveElapsedSeconds(it).toLong() } ?: 0L
     ClaudeActivityDisclosure(
         items = processItems,
         headline = activityHeadline(processItems, elapsedSeconds, thinkingActive),
         isRunning = isRunning,
+        autoCollapseOnFinish = autoCollapseOnFinish,
     )
 }
 
@@ -6719,8 +6920,14 @@ private fun ClaudeActivityDisclosure(
     items: List<ActivityItem>,
     headline: String,
     isRunning: Boolean = false,
+    autoCollapseOnFinish: Boolean = true,
 ) {
     var expandedItems by rememberSaveable { mutableStateOf(emptyList<Int>()) }
+    LaunchedEffect(isRunning) {
+        if (!isRunning && autoCollapseOnFinish) {
+            expandedItems = emptyList()
+        }
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
         if (items.isEmpty()) {
             ActivitySummaryRow(
@@ -7597,6 +7804,301 @@ private fun AttachmentChip(
             }
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AskClarificationCard(
+    request: AskRequest,
+    onSubmit: (Map<String, String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val selectedAnswers = remember(request.id) {
+        mutableStateMapOf<String, String>().apply {
+            request.questions.forEach { q ->
+                if (q.selectedOptions.isNotEmpty()) {
+                    put(q.id, q.selectedOptions.joinToString(", "))
+                } else if (q.customAnswer.isNotBlank()) {
+                    put(q.id, q.customAnswer)
+                }
+            }
+        }
+    }
+    val otherInputs = remember(request.id) {
+        mutableStateMapOf<String, String>().apply {
+            request.questions.forEach { q ->
+                if (q.customAnswer.isNotBlank()) put(q.id, q.customAnswer)
+            }
+        }
+    }
+    val showOther = remember(request.id) {
+        mutableStateMapOf<String, Boolean>()
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.HelpOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("Clarification needed", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            }
+
+            request.contextSummary?.takeIf { it.isNotBlank() }?.let { summary ->
+                Text(summary, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            request.questions.forEachIndexed { index, question ->
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "${index + 1}. ${question.question}",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                    )
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        question.options.forEach { option ->
+                            val isSelected = if (question.isMultiSelect) {
+                                (selectedAnswers[question.id] ?: "").split(", ").contains(option)
+                            } else {
+                                selectedAnswers[question.id] == option
+                            }
+
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    if (question.isMultiSelect) {
+                                        val currentSet = (selectedAnswers[question.id] ?: "")
+                                            .split(", ")
+                                            .filter { it.isNotBlank() }
+                                            .toMutableSet()
+                                        if (isSelected) currentSet.remove(option) else currentSet.add(option)
+                                        selectedAnswers[question.id] = currentSet.joinToString(", ")
+                                    } else {
+                                        selectedAnswers[question.id] = option
+                                        showOther[question.id] = false
+                                    }
+                                },
+                                label = { Text(option, fontSize = 12.sp) },
+                            )
+                        }
+
+                        val isOtherActive = showOther[question.id] == true
+                        FilterChip(
+                            selected = isOtherActive,
+                            onClick = {
+                                showOther[question.id] = !isOtherActive
+                            },
+                            label = { Text("Other…", fontSize = 12.sp) },
+                        )
+                    }
+
+                    if (showOther[question.id] == true) {
+                        OutlinedTextField(
+                            value = otherInputs[question.id] ?: "",
+                            onValueChange = { text ->
+                                otherInputs[question.id] = text
+                                if (question.isMultiSelect) {
+                                    val currentSet = (selectedAnswers[question.id] ?: "")
+                                        .split(", ")
+                                        .filter { it.isNotBlank() && !it.startsWith("Other: ") }
+                                        .toMutableSet()
+                                    if (text.isNotBlank()) currentSet.add("Other: $text")
+                                    selectedAnswers[question.id] = currentSet.joinToString(", ")
+                                } else {
+                                    selectedAnswers[question.id] = text
+                                }
+                            },
+                            placeholder = { Text("Enter custom answer…", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    Text("Skip")
+                }
+                Button(
+                    onClick = {
+                        val finalAnswers = request.questions.associate { q ->
+                            q.question to (selectedAnswers[q.id]?.ifBlank { "Skipped" } ?: "Skipped")
+                        }
+                        onSubmit(finalAnswers)
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Submit")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GitPushDialog(
+    project: Project?,
+    changes: List<ChangeItem>,
+    githubLogin: String?,
+    isPushing: Boolean,
+    pushMessage: String?,
+    onDismiss: () -> Unit,
+    onPush: (repoName: String, isNewRepo: Boolean, isPrivate: Boolean, commitMessage: String) -> Unit,
+) {
+    var repoName by rememberSaveable { mutableStateOf(project?.slug ?: "my-project") }
+    var commitMessage by rememberSaveable { mutableStateOf("Update project from Mobile Harness") }
+    var isNewRepo by rememberSaveable { mutableStateOf(true) }
+    var isPrivate by rememberSaveable { mutableStateOf(true) }
+    var showChangedFiles by rememberSaveable { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = { if (!isPushing) onDismiss() },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("Push to GitHub")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (githubLogin.isNullOrBlank()) {
+                    Text(
+                        "Not connected to GitHub. Connect in Settings or configure remote.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    Text(
+                        "Signed in as @$githubLogin",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = isNewRepo,
+                        onClick = { isNewRepo = true },
+                    )
+                    Text("New repo", fontSize = 13.sp)
+                    Spacer(Modifier.width(12.dp))
+                    RadioButton(
+                        selected = !isNewRepo,
+                        onClick = { isNewRepo = false },
+                    )
+                    Text("Existing repo", fontSize = 13.sp)
+                }
+
+                if (isNewRepo) {
+                    OutlinedTextField(
+                        value = repoName,
+                        onValueChange = { repoName = it },
+                        label = { Text("Repository name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Private repository", fontSize = 13.sp)
+                        Switch(checked = isPrivate, onCheckedChange = { isPrivate = it })
+                    }
+                }
+
+                OutlinedTextField(
+                    value = commitMessage,
+                    onValueChange = { commitMessage = it },
+                    label = { Text("Commit message") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 3,
+                )
+
+                Surface(
+                    onClick = { showChangedFiles = !showChangedFiles },
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Description, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Changed files (${changes.size})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            if (showChangedFiles) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+
+                if (showChangedFiles && changes.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 130.dp).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(changes, key = { it.path }) { change ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(change.path, fontSize = 11.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                                Text("+${change.additions} -${change.deletions}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+
+                if (isPushing) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(pushMessage ?: "Pushing…", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onPush(repoName.trim(), isNewRepo, isPrivate, commitMessage.trim())
+                },
+                enabled = !isPushing && (!isNewRepo || repoName.isNotBlank()),
+            ) {
+                Text(if (isPushing) "Pushing…" else "Push to GitHub")
+            }
+        },
+        dismissButton = {
+            if (!isPushing) {
+                OutlinedButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
 
 @Composable

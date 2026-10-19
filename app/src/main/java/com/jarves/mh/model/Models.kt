@@ -53,7 +53,7 @@ enum class ProviderKind(
         "Gemini API key from AI Studio",
         ProviderProtocol.OPENAI_CHAT,
         "https://generativelanguage.googleapis.com/v1beta/openai",
-        "gemini-2.0-flash",
+        "gemini-3.5-flash",
     ),
     GROK(
         "xAI Grok",
@@ -444,6 +444,8 @@ sealed interface RuntimeEvent {
     data class ToolRejected(override val sessionId: String, val approvalId: String) : RuntimeEvent
     data class ApprovalRequested(override val sessionId: String, val request: ToolRequest) : RuntimeEvent
     data class ApprovalHandled(override val sessionId: String, val toolUseId: String, val approved: Boolean) : RuntimeEvent
+    data class ClarificationRequested(override val sessionId: String, val request: AskRequest) : RuntimeEvent
+    data class ClarificationAnswered(override val sessionId: String, val requestId: String) : RuntimeEvent
     data class FilesChanged(override val sessionId: String, val changes: List<ChangeItem>) : RuntimeEvent {
         val paths: List<String> get() = changes.map { it.path }
     }
@@ -452,6 +454,24 @@ sealed interface RuntimeEvent {
     data class SessionFailed(override val sessionId: String, val reason: String) : RuntimeEvent
     data class Error(override val sessionId: String, val message: String) : RuntimeEvent
 }
+
+enum class ChangeKind { MODIFIED, CREATED, DELETED }
+
+data class AskQuestion(
+    val id: String = UUID.randomUUID().toString(),
+    val question: String,
+    val options: List<String>,
+    val isMultiSelect: Boolean = false,
+    val selectedOptions: Set<String> = emptySet(),
+    val customAnswer: String = "",
+)
+
+data class AskRequest(
+    val id: String = UUID.randomUUID().toString(),
+    val sessionId: String = "",
+    val questions: List<AskQuestion>,
+    val contextSummary: String? = null,
+)
 
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
@@ -554,6 +574,12 @@ data class ChangeItem(
     val accepted: Boolean? = null,
 ) {
     val filePath: String get() = path
+    val changeKind: ChangeKind
+        get() = when {
+            additions > 0 && deletions == 0 -> ChangeKind.CREATED
+            additions == 0 && deletions > 0 -> ChangeKind.DELETED
+            else -> ChangeKind.MODIFIED
+        }
 
     constructor(
         filePath: String,

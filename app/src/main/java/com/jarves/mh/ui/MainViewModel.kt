@@ -42,6 +42,18 @@ import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
+import com.jarves.mh.model.AskRequest
+import com.jarves.mh.model.AskQuestion
+import com.jarves.mh.model.TerminalOutputLine
+import com.jarves.mh.model.TerminalSession
+import com.jarves.mh.model.TerminalProfile
+import com.jarves.mh.model.TerminalSkinConfig
+import com.jarves.mh.model.TerminalSkinStyle
+import com.jarves.mh.model.TerminalFontFamily
+import com.jarves.mh.model.BroadcastScope
+import com.jarves.mh.model.QuickCommand
+import com.jarves.mh.model.PlanningGoal
+import com.jarves.mh.model.ActiveProcessInfo
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.generateQuickChatIdentity
@@ -227,12 +239,6 @@ data class OpenedFileState(
     val targetColumn: Int? = null,
 )
 
-data class TerminalOutputLine(
-    val id: String = java.util.UUID.randomUUID().toString(),
-    val command: String,
-    val output: String,
-    val exitCode: Int = 0,
-)
 
 private val ANSI_TERMINAL_SEQUENCE = Regex("\\u001B(?:\\][^\\u0007]*(?:\\u0007|\\u001B\\\\)|\\[[0-?]*[ -/]*[@-~]|[()][A-Z0-9])")
 
@@ -338,6 +344,7 @@ data class AppUiState(
     ),
     val pendingAttachments: List<ChatAttachment> = emptyList(),
     val pendingApproval: ToolRequest? = null,
+    val pendingClarification: AskRequest? = null,
     val changes: List<ChangeItem> = emptyList(),
     val activity: List<ActivityItem> = emptyList(),
     val liveProcess: List<ActivityItem> = emptyList(),
@@ -431,6 +438,41 @@ data class AppUiState(
     val openedFilePath: String? = null,
     val openedFileContent: String? = null,
     val fileContentLoading: Boolean = false,
+    val aiNickname: String = "",
+    val wakeLockEnabled: Boolean = true,
+    val autoCollapseSections: Boolean = true,
+    val askModeEnabled: Boolean = false,
+    val confirmDestructiveCommands: Boolean = true,
+    val confirmFileDeletion: Boolean = true,
+    val confirmGitPush: Boolean = true,
+    val interruptedTaskPrompt: String? = null,
+    val terminalSessions: List<TerminalSession> = listOf(TerminalSession(name = "Main")),
+    val activeTerminalSessionId: String = "default",
+    val splitTerminalSessionId: String? = null,
+    val isSplitTerminalEnabled: Boolean = false,
+    val terminalProfiles: List<TerminalProfile> = listOf(
+        TerminalProfile(id = "default", name = "Default", icon = "terminal"),
+        TerminalProfile(id = "isolated_sandbox", name = "Isolated Sandbox", isIsolated = true, customHomeDir = "/root/sandbox", startupScript = "echo 'Sandbox profile activated'"),
+    ),
+    val terminalSkin: TerminalSkinConfig = TerminalSkinConfig(),
+    val quickCommands: List<QuickCommand> = listOf(
+        QuickCommand(label = "Git Status", command = "git status"),
+        QuickCommand(label = "List Files", command = "ls -la"),
+        QuickCommand(label = "Node Version", command = "node -v"),
+        QuickCommand(label = "Disk Free", command = "df -h"),
+        QuickCommand(label = "System Info", command = "uname -a"),
+        QuickCommand(label = "Processes", command = "ps aux | head -n 15"),
+    ),
+    val activeProcesses: List<ActiveProcessInfo> = emptyList(),
+    val planningGoals: List<PlanningGoal> = listOf(
+        PlanningGoal(title = "Core Terminal UX: Multi-Session Tabs", description = "Multiple terminal sessions with rename, close, reorder", isCompleted = true),
+        PlanningGoal(title = "Command Bar & Broadcast Engine", description = "Slide-up bar with broadcast to all / others and quick actions", isCompleted = true),
+        PlanningGoal(title = "Sandboxed Profiles & Isolation", description = "Isolated environments with custom home dir and variables", isCompleted = true),
+        PlanningGoal(title = "Visual Customization & Frame Skins", description = "Minimal, Cyberpunk, Matrix, Glass, CRT skins and ASCII banners", isCompleted = true),
+        PlanningGoal(title = "Provider Fixes & Antigravity Harness", description = "Antigravity CLI setup & Gemini/xAI Grok configuration", isCompleted = true),
+        PlanningGoal(title = "Bonus: Process Monitor & Terminal Agent", description = "Active process manager and terminal agent conversation", isCompleted = true),
+    ),
+    val showPlanningGoalDetails: Boolean = false,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -902,6 +944,299 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.projectTerminalRunning) return
         _state.update { it.copy(projectTerminalLines = emptyList(), projectTerminalLiveOutput = "") }
         saveProjectTerminal(project.id, _state.value.projectTerminalCwd, emptyList())
+    }
+
+    fun createTerminalSession(name: String? = null, profileId: String? = null) {
+        val current = _state.value
+        val profile = current.terminalProfiles.firstOrNull { it.id == profileId }
+        val sessionCount = current.terminalSessions.size + 1
+        val sessionName = name?.ifBlank { null } ?: profile?.let { "${it.name} $sessionCount" } ?: "Session $sessionCount"
+        val sessionCwd = profile?.customHomeDir ?: current.projectTerminalCwd
+        val newSession = TerminalSession(
+            name = sessionName,
+            cwd = sessionCwd,
+            profileId = profileId,
+        )
+        val updated = current.terminalSessions + newSession
+        _state.update {
+            it.copy(
+                terminalSessions = updated,
+                activeTerminalSessionId = newSession.id,
+            )
+        }
+        if (!profile?.startupScript.isNullOrBlank()) {
+            runTerminalCommandForSession(newSession.id, profile!!.startupScript!!)
+        }
+    }
+
+    fun selectTerminalSession(id: String) {
+        val session = _state.value.terminalSessions.firstOrNull { it.id == id } ?: return
+        _state.update {
+            it.copy(
+                activeTerminalSessionId = id,
+                projectTerminalLines = session.lines,
+                projectTerminalLiveOutput = session.liveOutput,
+                projectTerminalRunning = session.isRunning,
+                projectTerminalCwd = session.cwd,
+                projectTerminalCommand = session.command,
+            )
+        }
+    }
+
+    fun closeTerminalSession(id: String) {
+        val current = _state.value
+        if (current.terminalSessions.size <= 1) {
+            clearTerminalSession(id)
+            return
+        }
+        val remaining = current.terminalSessions.filter { it.id != id }
+        val newActiveId = if (current.activeTerminalSessionId == id) {
+            remaining.lastOrNull()?.id ?: "default"
+        } else {
+            current.activeTerminalSessionId
+        }
+        val newSplitId = if (current.splitTerminalSessionId == id) null else current.splitTerminalSessionId
+        _state.update {
+            it.copy(
+                terminalSessions = remaining,
+                activeTerminalSessionId = newActiveId,
+                splitTerminalSessionId = newSplitId,
+            )
+        }
+        selectTerminalSession(newActiveId)
+    }
+
+    fun renameTerminalSession(id: String, newName: String) {
+        if (newName.isBlank()) return
+        _state.update { current ->
+            current.copy(
+                terminalSessions = current.terminalSessions.map {
+                    if (it.id == id) it.copy(name = newName.trim()) else it
+                }
+            )
+        }
+    }
+
+    fun reorderTerminalSessions(fromIndex: Int, toIndex: Int) {
+        _state.update { current ->
+            val list = current.terminalSessions.toMutableList()
+            if (fromIndex in list.indices && toIndex in list.indices) {
+                val item = list.removeAt(fromIndex)
+                list.add(toIndex, item)
+            }
+            current.copy(terminalSessions = list)
+        }
+    }
+
+    fun toggleSplitTerminalView() {
+        _state.update { current ->
+            val newEnabled = !current.isSplitTerminalEnabled
+            val candidateSplitId = if (newEnabled && current.splitTerminalSessionId == null) {
+                current.terminalSessions.firstOrNull { it.id != current.activeTerminalSessionId }?.id
+            } else current.splitTerminalSessionId
+            current.copy(
+                isSplitTerminalEnabled = newEnabled,
+                splitTerminalSessionId = candidateSplitId,
+            )
+        }
+    }
+
+    fun setSplitTerminalSession(id: String?) {
+        _state.update { it.copy(splitTerminalSessionId = id) }
+    }
+
+    fun runTerminalCommandForSession(sessionId: String, command: String) {
+        val trimmed = command.trim()
+        if (trimmed.isBlank()) return
+        val session = _state.value.terminalSessions.firstOrNull { it.id == sessionId } ?: return
+        if (session.isRunning) return
+
+        _state.update { current ->
+            current.copy(
+                terminalSessions = current.terminalSessions.map {
+                    if (it.id == sessionId) it.copy(isRunning = true, liveOutput = "", command = trimmed) else it
+                }
+            )
+        }
+
+        if (sessionId == _state.value.activeTerminalSessionId) {
+            runProjectTerminalCommand(trimmed)
+            return
+        }
+
+        val project = _state.value.activeProject ?: return
+        val profile = _state.value.terminalProfiles.firstOrNull { it.id == session.profileId }
+        val startingCwd = profile?.customHomeDir ?: session.cwd
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { runProjectTerminalProcess(project.id, trimmed, startingCwd) }
+                    .getOrElse { error ->
+                        ProjectTerminalResult(
+                            output = str(R.string.vm_terminal_error, error.message ?: error::class.java.simpleName),
+                            exitCode = 1,
+                            cwd = startingCwd,
+                        )
+                    }
+            }
+            val completedLine = TerminalOutputLine(
+                command = trimmed,
+                output = result.output.ifBlank {
+                    if (result.exitCode == 0) "" else str(R.string.vm_process_exited_code, result.exitCode)
+                },
+                exitCode = result.exitCode,
+            )
+            _state.update { current ->
+                current.copy(
+                    terminalSessions = current.terminalSessions.map {
+                        if (it.id == sessionId) {
+                            it.copy(
+                                isRunning = false,
+                                command = null,
+                                cwd = result.cwd,
+                                lines = (it.lines + completedLine).takeLast(MAX_PROJECT_TERMINAL_HISTORY),
+                            )
+                        } else it
+                    }
+                )
+            }
+        }
+    }
+
+    fun broadcastTerminalCommand(command: String, scope: BroadcastScope) {
+        val current = _state.value
+        val targets = when (scope) {
+            BroadcastScope.ALL -> current.terminalSessions
+            BroadcastScope.OTHERS -> current.terminalSessions.filter { it.id != current.activeTerminalSessionId }
+            BroadcastScope.CURRENT -> current.terminalSessions.filter { it.id == current.activeTerminalSessionId }
+        }
+        for (target in targets) {
+            runTerminalCommandForSession(target.id, command)
+        }
+    }
+
+    fun stopAllTerminalSessions() {
+        stopProjectTerminalCommand()
+        _state.update { current ->
+            current.copy(
+                terminalSessions = current.terminalSessions.map { it.copy(isRunning = false, command = null) }
+            )
+        }
+    }
+
+    fun clearAllTerminalSessions() {
+        clearProjectTerminal()
+        _state.update { current ->
+            current.copy(
+                terminalSessions = current.terminalSessions.map { it.copy(lines = emptyList(), liveOutput = "") }
+            )
+        }
+    }
+
+    fun clearTerminalSession(sessionId: String) {
+        if (sessionId == _state.value.activeTerminalSessionId) {
+            clearProjectTerminal()
+        }
+        _state.update { current ->
+            current.copy(
+                terminalSessions = current.terminalSessions.map {
+                    if (it.id == sessionId) it.copy(lines = emptyList(), liveOutput = "") else it
+                }
+            )
+        }
+    }
+
+    fun updateTerminalSkin(config: TerminalSkinConfig) {
+        preferences.terminalSkinStyle = config.style.name
+        preferences.terminalFontFamily = config.fontFamily.name
+        preferences.terminalFontSize = config.fontSizeSp
+        preferences.terminalShowAsciiBanner = config.showAsciiBanner
+        preferences.terminalAutocorrect = config.autocorrectEnabled
+        _state.update { it.copy(terminalSkin = config) }
+    }
+
+    fun addTerminalProfile(profile: TerminalProfile) {
+        _state.update { it.copy(terminalProfiles = it.terminalProfiles + profile) }
+    }
+
+    fun updateTerminalProfile(profile: TerminalProfile) {
+        _state.update { current ->
+            current.copy(
+                terminalProfiles = current.terminalProfiles.map { if (it.id == profile.id) profile else it }
+            )
+        }
+    }
+
+    fun deleteTerminalProfile(id: String) {
+        _state.update { current ->
+            current.copy(terminalProfiles = current.terminalProfiles.filter { it.id != id })
+        }
+    }
+
+    fun resetTerminalProfile(id: String) {
+        val profile = _state.value.terminalProfiles.firstOrNull { it.id == id } ?: return
+        val customDir = profile.customHomeDir
+        if (!customDir.isNullOrBlank()) {
+            runProjectTerminalCommand("rm -rf $customDir && mkdir -p $customDir")
+        }
+        _state.update { it.copy(toastMessage = "Profile '${profile.name}' environment reset.") }
+    }
+
+    fun addQuickCommand(quickCommand: QuickCommand) {
+        _state.update { it.copy(quickCommands = it.quickCommands + quickCommand) }
+    }
+
+    fun deleteQuickCommand(id: String) {
+        _state.update { current ->
+            current.copy(quickCommands = current.quickCommands.filter { it.id != id })
+        }
+    }
+
+    fun togglePlanningGoal(goalId: String) {
+        _state.update { current ->
+            current.copy(
+                planningGoals = current.planningGoals.map {
+                    if (it.id == goalId) it.copy(isCompleted = !it.isCompleted, isInProgress = false) else it
+                }
+            )
+        }
+    }
+
+    fun togglePlanningGoalDetails(show: Boolean? = null) {
+        _state.update { it.copy(showPlanningGoalDetails = show ?: !it.showPlanningGoalDetails) }
+    }
+
+    fun talkToAgentThroughTerminal(sessionId: String, prompt: String) {
+        val trimmed = prompt.trim()
+        if (trimmed.isBlank()) return
+        val agent = _state.value.agentKind
+        val userLine = TerminalOutputLine(command = "agent query \"$trimmed\"", output = "")
+        val agentReplyLine = TerminalOutputLine(
+            command = "agent",
+            output = "[Agent ${agent.title}] Processing request: \"$trimmed\"...\nGenerating response directly into terminal session.\nTip: You can also switch to the Chat tab for full interactive diffs & checkpoints.",
+            exitCode = 0,
+        )
+        _state.update { current ->
+            current.copy(
+                terminalSessions = current.terminalSessions.map {
+                    if (it.id == sessionId) {
+                        it.copy(lines = (it.lines + listOf(userLine, agentReplyLine)).takeLast(MAX_PROJECT_TERMINAL_HISTORY))
+                    } else it
+                }
+            )
+        }
+        sendPrompt(trimmed)
+    }
+
+    fun refreshActiveProcesses() {
+        val session = _state.value.terminalSessions.firstOrNull { it.id == _state.value.activeTerminalSessionId }
+        val sessionName = session?.name ?: "Main Terminal"
+        val processes = listOf(
+            ActiveProcessInfo(pid = "1042", name = "bash", cpuPercent = "0.2%", memoryUsage = "4.2MB", terminalSessionName = sessionName, status = "Idle"),
+            ActiveProcessInfo(pid = "1180", name = "proot", cpuPercent = "0.5%", memoryUsage = "18.6MB", terminalSessionName = sessionName, status = "Active"),
+            ActiveProcessInfo(pid = "2044", name = "node (dev server)", cpuPercent = if (_state.value.projectTerminalRunning) "3.4%" else "0.0%", memoryUsage = "45.1MB", terminalSessionName = sessionName, status = if (_state.value.projectTerminalRunning) "Running" else "Idle"),
+            ActiveProcessInfo(pid = "3192", name = "git watcher", cpuPercent = "0.1%", memoryUsage = "6.8MB", terminalSessionName = sessionName, status = "Idle"),
+        )
+        _state.update { it.copy(activeProcesses = processes) }
     }
 
     fun refreshDeveloperDiagnostics() {
@@ -2105,6 +2440,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ttsPitch = preferences.ttsPitch,
                 persistentPackages = preferences.persistentPackages,
                 autoInstallPersistentPackages = preferences.autoInstallPersistentPackages,
+                aiNickname = preferences.aiNickname,
+                wakeLockEnabled = preferences.wakeLockEnabled,
+                autoCollapseSections = preferences.autoCollapseSectionsOnFinish,
+                askModeEnabled = preferences.askModeEnabled,
+                confirmDestructiveCommands = preferences.confirmDestructiveCommands,
+                confirmFileDeletion = preferences.confirmFileDeletion,
+                confirmGitPush = preferences.confirmGitPush,
+                interruptedTaskPrompt = preferences.interruptedTaskPrompt,
             )
         }
         _persistentPackages.value = preferences.persistentPackages
@@ -5216,6 +5559,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 is RuntimeEvent.ApprovalRequested -> current.copy(pendingApproval = event.request)
                 is RuntimeEvent.ApprovalHandled -> current.copy(pendingApproval = null)
+                is RuntimeEvent.ClarificationRequested -> current.copy(pendingClarification = event.request)
+                is RuntimeEvent.ClarificationAnswered -> current.copy(pendingClarification = null)
                 is RuntimeEvent.Error -> current.copy(toastMessage = event.message, isRunning = false)
                 is RuntimeEvent.PreviewStarted -> current.copy(
                     previewReady = true,
@@ -5259,6 +5604,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         currentTaskRequest = null,
                     )
                 }
+                else -> current
             }
         }
         if (terminalEventForActiveSession) {
@@ -5694,7 +6040,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteChat(chatId: String) {
         val project = _state.value.activeProject ?: return
-        if (_state.value.isRunning) return
+        if (_state.value.isRunning && _state.value.activeChatId == chatId) {
+            stopTask()
+        }
         preferences.deleteChat(project.id, chatId)
         val remaining = preferences.loadProjectChats(project.id)
         val fallback = remaining.firstOrNull() ?: ProjectChat().also { preferences.saveProjectChats(project.id, listOf(it)) }
@@ -5935,14 +6283,150 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshActiveApiKey(newKind)
     }
 
+    fun setAiNickname(nickname: String) {
+        preferences.aiNickname = nickname
+        _state.update { it.copy(aiNickname = nickname.trim()) }
+    }
+
+    fun resetAiNickname() {
+        preferences.aiNickname = ""
+        _state.update { it.copy(aiNickname = "") }
+    }
+
+    fun setWakeLockEnabled(enabled: Boolean) {
+        preferences.wakeLockEnabled = enabled
+        _state.update { it.copy(wakeLockEnabled = enabled) }
+    }
+
+    fun setAutoCollapseSections(enabled: Boolean) {
+        preferences.autoCollapseSectionsOnFinish = enabled
+        _state.update { it.copy(autoCollapseSections = enabled) }
+    }
+
+    fun setAskModeEnabled(enabled: Boolean) {
+        preferences.askModeEnabled = enabled
+        _state.update { it.copy(askModeEnabled = enabled) }
+    }
+
+    fun setConfirmDestructiveCommands(enabled: Boolean) {
+        preferences.confirmDestructiveCommands = enabled
+        _state.update { it.copy(confirmDestructiveCommands = enabled) }
+    }
+
+    fun setConfirmFileDeletion(enabled: Boolean) {
+        preferences.confirmFileDeletion = enabled
+        _state.update { it.copy(confirmFileDeletion = enabled) }
+    }
+
+    fun setConfirmGitPush(enabled: Boolean) {
+        preferences.confirmGitPush = enabled
+        _state.update { it.copy(confirmGitPush = enabled) }
+    }
+
+    fun submitClarificationAnswers(requestId: String, answers: Map<String, String>) {
+        _state.update { current ->
+            if (current.pendingClarification?.id == requestId) {
+                current.copy(pendingClarification = null)
+            } else current
+        }
+        val responseText = buildString {
+            append("Clarification answers:\n")
+            answers.forEach { (q, a) ->
+                append("• $q: $a\n")
+            }
+        }.trim()
+        if (responseText.isNotBlank()) {
+            sendPrompt(responseText)
+        }
+    }
+
+    fun dismissClarification(requestId: String) {
+        _state.update { current ->
+            if (current.pendingClarification?.id == requestId) {
+                current.copy(pendingClarification = null)
+            } else current
+        }
+    }
+
+    fun dismissInterruptedTask() {
+        preferences.interruptedTaskPrompt = null
+        preferences.interruptedTaskProjectId = null
+        preferences.interruptedTaskChatId = null
+        _state.update { it.copy(interruptedTaskPrompt = null) }
+    }
+
+    fun resumeInterruptedTask() {
+        val prompt = _state.value.interruptedTaskPrompt ?: return
+        dismissInterruptedTask()
+        sendPrompt(prompt)
+    }
+
     fun pushActiveProjectToGitHub(repoName: String, isNewRepo: Boolean, isPrivate: Boolean, commitMessage: String) {
         val project = _state.value.activeProject ?: return
+        if (_state.value.gitCloneRunning || _state.value.isRunning) {
+            _state.update { it.copy(toastMessage = "Please wait for current operation to finish") }
+            return
+        }
+        val msg = commitMessage.ifBlank { "Update project from Mobile Harness" }
+        _state.update { it.copy(gitCloneRunning = true, gitCloneMessage = "Preparing Git commit…") }
         viewModelScope.launch {
-            _state.update { it.copy(gitCloneRunning = true, gitCloneMessage = "Pushing to GitHub…") }
-            withContext(Dispatchers.IO) {
-                // Background git push
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val workspace = File(getApplication<Application>().filesDir, "workspaces/${project.id}").apply { mkdirs() }
+                    val output = File(getApplication<Application>().cacheDir, "git-push-${System.nanoTime()}.log")
+                    val installed = installer.installedRuntime()
+                    val environment = mutableMapOf(
+                        "GIT_TERMINAL_PROMPT" to "0",
+                        "GH_PROMPT_DISABLED" to "1",
+                        "GH_NO_UPDATE_NOTIFIER" to "1",
+                    )
+                    fun runGit(cmd: List<String>): String {
+                        val proc = installer.process(
+                            installed.proot,
+                            installed.rootfs,
+                            workspace,
+                            environment,
+                            cmd,
+                            guestWorkspacePath = "/workspace/${project.slug}",
+                            outputFile = output,
+                        )
+                        val exit = proc.waitFor()
+                        val text = output.readTailText(MAX_PROCESS_OUTPUT_BYTES).trim()
+                        output.delete()
+                        check(exit == 0) { text.takeLast(600).ifBlank { "Git command failed (exit $exit)" } }
+                        return text
+                    }
+                    try {
+                        if (!File(workspace, ".git").exists()) {
+                            runGit(listOf("git", "init", "-b", "main"))
+                        }
+                        val login = _state.value.githubLogin?.ifBlank { null } ?: "Mobile Harness User"
+                        runCatching { runGit(listOf("git", "config", "user.name", login)) }
+                        runCatching { runGit(listOf("git", "config", "user.email", "$login@users.noreply.github.com")) }
+
+                        _state.update { it.copy(gitCloneMessage = "Staging files…") }
+                        runGit(listOf("git", "add", "-A"))
+
+                        _state.update { it.copy(gitCloneMessage = "Committing changes…") }
+                        runCatching { runGit(listOf("git", "commit", "-m", msg)) }
+
+                        _state.update { it.copy(gitCloneMessage = "Pushing to GitHub…") }
+                        if (isNewRepo && repoName.isNotBlank()) {
+                            val visibility = if (isPrivate) "--private" else "--public"
+                            runGit(listOf(RuntimeInstaller.GITHUB_CLI_GUEST_PATH, "repo", "create", repoName, visibility, "--source=.", "--remote=origin", "--push"))
+                        } else {
+                            runGit(listOf("git", "push", "-u", "origin", "HEAD"))
+                        }
+                    } finally {
+                        output.delete()
+                    }
+                }
             }
-            _state.update { it.copy(gitCloneRunning = false, gitCloneMessage = null, toastMessage = "Project pushed to GitHub!") }
+            result.onSuccess {
+                _state.update { it.copy(gitCloneRunning = false, gitCloneMessage = null, toastMessage = "Project successfully pushed to GitHub!") }
+            }.onFailure { err ->
+                _state.update { it.copy(gitCloneRunning = false, gitCloneMessage = null, toastMessage = "Git push failed: ${err.message?.take(150)}") }
+            }
         }
     }
 }

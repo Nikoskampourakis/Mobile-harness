@@ -141,9 +141,12 @@ class RuntimeExecutionService : Service() {
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
-        wakeLock = getSystemService(PowerManager::class.java)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.jarves.mh:active-coding-task")
-            .apply { acquire(MAX_WAKE_LOCK_MS) }
+        if (!com.jarves.mh.data.AppPreferences(this).wakeLockEnabled) return
+        runCatching {
+            wakeLock = getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.jarves.mh:active-coding-task")
+                .apply { acquire(MAX_WAKE_LOCK_MS) }
+        }
     }
 
     private fun releaseWakeLock() {

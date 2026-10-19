@@ -168,7 +168,7 @@ class ProviderApiClient(private val context: Context? = null) {
         }
         return runCatching {
             val targetUrl = if (endpoint.contains("generativelanguage.googleapis.com") && apiKey.isNotBlank() && !endpoint.contains("key=")) {
-                if (endpoint.contains("?")) "&key=" else "?key="
+                if (endpoint.contains("?")) "$endpoint&key=$apiKey" else "$endpoint?key=$apiKey"
             } else endpoint
             val connection = (URL(targetUrl).openConnection() as HttpURLConnection).apply {
                 requestMethod = method

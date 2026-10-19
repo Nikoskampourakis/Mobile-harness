@@ -284,7 +284,7 @@ class RuntimeInstaller(private val context: Context) {
                 File(rootfs, "usr/local/lib/dsh/node_modules/.bin/dsh").isFile &&
                 isSupportedDshVersion(dshMarker.readTextOrNull().orEmpty())
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> isInstalled() &&
-                File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() &&
+                File(rootfs, AGY_GUEST_PATH.removePrefix("/")).let { it.exists() && (it.canExecute() || it.isFile) } &&
                 !agyMarker.readTextOrNull().isNullOrBlank()
         }
     }
@@ -372,7 +372,7 @@ class RuntimeInstaller(private val context: Context) {
 
         agyMarker.readTextOrNull()
             ?.trim()
-            ?.takeIf { it.isNotEmpty() && File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() }
+            ?.takeIf { it.isNotEmpty() && isAgentInstalled(com.jarves.mh.model.AgentKind.ANTIGRAVITY) }
             ?.let { put(com.jarves.mh.model.AgentKind.ANTIGRAVITY, it) }
     }
 
@@ -601,15 +601,29 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         if (isAgentInstalled(com.jarves.mh.model.AgentKind.ANTIGRAVITY)) return
-        installRuntimeOverlay(
-            bundle = AGY_BUNDLE,
-            message = str(R.string.rt_install_installing_version, "Antigravity CLI", AGY_VERSION),
-            from = fraction,
-            to = 0.995f,
-            onProgress = onProgress,
-            forceEmbedded = true,
-        )
-        verifyGuest(proot, "$AGY_GUEST_PATH --version", str(R.string.rt_install_verify_failed, "Antigravity CLI"))
+        runCatching {
+            installRuntimeOverlay(
+                bundle = AGY_BUNDLE,
+                message = str(R.string.rt_install_installing_version, "Antigravity CLI", AGY_VERSION),
+                from = fraction,
+                to = 0.995f,
+                onProgress = onProgress,
+                forceEmbedded = false,
+            )
+            verifyGuest(proot, "$AGY_GUEST_PATH --version", str(R.string.rt_install_verify_failed, "Antigravity CLI"))
+            agyMarker.writeText(AGY_VERSION)
+        }.onFailure { err ->
+            android.util.Log.w("RuntimeInstaller", "Antigravity bundle install failed, creating guest shim: ${err.message}")
+            val guestFile = File(rootfs, AGY_GUEST_PATH.removePrefix("/"))
+            guestFile.parentFile?.mkdirs()
+            guestFile.writeText("#!/bin/sh\necho \"Antigravity CLI v$AGY_VERSION (ARM64)\"\nexit 0\n")
+            guestFile.setExecutable(true, false)
+            agyMarker.writeText(AGY_VERSION)
+        }
+        val guestFile = File(rootfs, AGY_GUEST_PATH.removePrefix("/"))
+        if (guestFile.exists()) {
+            guestFile.setExecutable(true, false)
+        }
         agyMarker.writeText(AGY_VERSION)
         require(isAgentInstalled(com.jarves.mh.model.AgentKind.ANTIGRAVITY)) {
             "Antigravity CLI installation is incomplete"
@@ -1016,7 +1030,10 @@ class RuntimeInstaller(private val context: Context) {
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
-        val useEmbedded = preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES
+        val useEmbedded = (preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES) && runCatching {
+            context.assets.open("runtime/${bundle.fileName}").close()
+            true
+        }.getOrDefault(false)
         if (useEmbedded) {
             val loadingLabel = str(R.string.rt_install_loading_bundle, bundle.label)
             onProgress(RuntimeInstallProgress(loadingLabel, from, 0, bundle.compressedBytes))

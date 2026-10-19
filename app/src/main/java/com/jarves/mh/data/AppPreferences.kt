@@ -68,6 +68,70 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("github_login", "") ?: ""
         set(value) { preferences.edit().putString("github_login", value).apply() }
 
+    var wakeLockEnabled: Boolean
+        get() = preferences.getBoolean("wake_lock_enabled", true)
+        set(value) { preferences.edit().putBoolean("wake_lock_enabled", value).apply() }
+
+    var aiNickname: String
+        get() = preferences.getString("ai_nickname", "") ?: ""
+        set(value) { preferences.edit().putString("ai_nickname", value.trim()).apply() }
+
+    var autoCollapseSectionsOnFinish: Boolean
+        get() = preferences.getBoolean("auto_collapse_sections", true)
+        set(value) { preferences.edit().putBoolean("auto_collapse_sections", value).apply() }
+
+    var confirmDestructiveCommands: Boolean
+        get() = preferences.getBoolean("confirm_destructive_commands", true)
+        set(value) { preferences.edit().putBoolean("confirm_destructive_commands", value).apply() }
+
+    var confirmFileDeletion: Boolean
+        get() = preferences.getBoolean("confirm_file_deletion", true)
+        set(value) { preferences.edit().putBoolean("confirm_file_deletion", value).apply() }
+
+    var confirmGitPush: Boolean
+        get() = preferences.getBoolean("confirm_git_push", true)
+        set(value) { preferences.edit().putBoolean("confirm_git_push", value).apply() }
+
+    var askModeEnabled: Boolean
+        get() = preferences.getBoolean("ask_mode_enabled", false)
+        set(value) { preferences.edit().putBoolean("ask_mode_enabled", value).apply() }
+
+    var interruptedTaskPrompt: String?
+        get() = preferences.getString("interrupted_task_prompt", null)
+        set(value) { preferences.edit().putString("interrupted_task_prompt", value).apply() }
+
+    var interruptedTaskProjectId: String?
+        get() = preferences.getString("interrupted_task_project_id", null)
+        set(value) { preferences.edit().putString("interrupted_task_project_id", value).apply() }
+
+    var interruptedTaskChatId: String?
+        get() = preferences.getString("interrupted_task_chat_id", null)
+        set(value) { preferences.edit().putString("interrupted_task_chat_id", value).apply() }
+
+    var terminalSkinStyle: String
+        get() = preferences.getString("terminal_skin_style", "MINIMAL") ?: "MINIMAL"
+        set(value) { preferences.edit().putString("terminal_skin_style", value).apply() }
+
+    var terminalFontFamily: String
+        get() = preferences.getString("terminal_font_family", "MONOSPACE") ?: "MONOSPACE"
+        set(value) { preferences.edit().putString("terminal_font_family", value).apply() }
+
+    var terminalFontSize: Float
+        get() = preferences.getFloat("terminal_font_size", 12.5f)
+        set(value) { preferences.edit().putFloat("terminal_font_size", value).apply() }
+
+    var terminalShowAsciiBanner: Boolean
+        get() = preferences.getBoolean("terminal_show_ascii_banner", true)
+        set(value) { preferences.edit().putBoolean("terminal_show_ascii_banner", value).apply() }
+
+    var terminalAutocorrect: Boolean
+        get() = preferences.getBoolean("terminal_autocorrect", true)
+        set(value) { preferences.edit().putBoolean("terminal_autocorrect", value).apply() }
+
+    var experimentalIsolatedEnvironments: Boolean
+        get() = preferences.getBoolean("experimental_isolated_environments", false)
+        set(value) { preferences.edit().putBoolean("experimental_isolated_environments", value).apply() }
+
     fun saveAgentConversation(agent: AgentKind, projectId: String, chatId: String, conversationId: String?) {
         val key = agentConversationKey(agent, projectId, chatId)
         preferences.edit().apply {

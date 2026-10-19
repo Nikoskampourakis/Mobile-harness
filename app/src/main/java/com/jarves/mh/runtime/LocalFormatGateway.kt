@@ -175,18 +175,25 @@ internal class LocalFormatGateway(
     }
 
     private fun callProvider(body: JSONObject): Pair<Int, String> {
-        val endpoint = profile.baseUrl.trimEnd('/') + "/chat/completions"
-        if (!com.jarves.mh.network.LocalNetwork.isPlainHttpAllowed(endpoint)) {
+        val base = profile.baseUrl.trimEnd('/')
+        val endpoint = if (base.endsWith("/chat/completions")) base else "$base/chat/completions"
+        val targetUrl = if (endpoint.contains("generativelanguage.googleapis.com") && apiKey.isNotBlank() && !endpoint.contains("key=")) {
+            if (endpoint.contains("?")) "$endpoint&key=$apiKey" else "$endpoint?key=$apiKey"
+        } else endpoint
+        if (!com.jarves.mh.network.LocalNetwork.isPlainHttpAllowed(targetUrl)) {
             return 400 to errorJson("invalid_request_error", "Plain http:// is only allowed for local network addresses")
         }
-        val connection = URL(endpoint).openConnection() as HttpURLConnection
+        val connection = URL(targetUrl).openConnection() as HttpURLConnection
         return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
             connection.readTimeout = 180_000
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            if (apiKey.isNotBlank()) {
+                connection.setRequestProperty("Authorization", "Bearer $apiKey")
+                connection.setRequestProperty("api-key", apiKey)
+            }
             connection.outputStream.use { it.write(body.toString().toByteArray()) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream

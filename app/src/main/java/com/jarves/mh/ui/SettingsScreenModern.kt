@@ -122,7 +122,7 @@ import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { APPEARANCE, LANGUAGE, TTS, TOOLS, PACKAGES, RUNTIME, DIAGNOSTICS, UPDATE_CHANNEL }
+private enum class SettingsSection { APPEARANCE, LANGUAGE, TTS, TOOLS, PACKAGES, CUSTOMIZATION, RUNTIME, DIAGNOSTICS, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -169,6 +169,14 @@ fun SettingsScreen(
     onAddPersistentPackage: (String) -> Unit = {},
     onRemovePersistentPackage: (String) -> Unit = {},
     onSetAutoInstallPersistentPackages: (Boolean) -> Unit = {},
+    onSetAiNickname: (String) -> Unit = {},
+    onResetAiNickname: () -> Unit = {},
+    onSetWakeLockEnabled: (Boolean) -> Unit = {},
+    onSetAutoCollapseSections: (Boolean) -> Unit = {},
+    onSetAskModeEnabled: (Boolean) -> Unit = {},
+    onSetConfirmDestructiveCommands: (Boolean) -> Unit = {},
+    onSetConfirmFileDeletion: (Boolean) -> Unit = {},
+    onSetConfirmGitPush: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
@@ -616,6 +624,169 @@ fun SettingsScreen(
                             )
                         }
                         if (index != DevStack.entries.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    }
+                }
+            }
+
+            item {
+                var nicknameText by rememberSaveable(state.aiNickname) { mutableStateOf(state.aiNickname) }
+                SettingsAccordion(
+                    title = "Workflow & Customization",
+                    subtitle = "AI nickname, background execution, and action safeguards",
+                    icon = Icons.Default.Tune,
+                    expanded = expanded == SettingsSection.CUSTOMIZATION,
+                    onClick = { toggle(SettingsSection.CUSTOMIZATION) },
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text("AI Nickname", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text(
+                            "Assign a personalized nickname (like Jarvis) for the AI assistant across the app.",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedTextField(
+                                value = nicknameText,
+                                onValueChange = { nicknameText = it },
+                                placeholder = { Text("e.g. Jarvis") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                onClick = { onSetAiNickname(nicknameText) },
+                            ) {
+                                Text("Save")
+                            }
+                            if (state.aiNickname.isNotBlank()) {
+                                OutlinedButton(
+                                    onClick = {
+                                        nicknameText = ""
+                                        onResetAiNickname()
+                                    },
+                                ) {
+                                    Text("Reset")
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("CPU Wake Lock", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(
+                                    "Keep background tasks running when screen is turned off.",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Switch(
+                                checked = state.wakeLockEnabled,
+                                onCheckedChange = onSetWakeLockEnabled,
+                            )
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Auto-Collapse Activity Logs", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(
+                                    "Automatically collapse tool execution details when generation finishes.",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Switch(
+                                checked = state.autoCollapseSections,
+                                onCheckedChange = onSetAutoCollapseSections,
+                            )
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Ask Mode (Clarification Flow)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(
+                                    "Request clarification with suggested choices before executing ambiguous tasks.",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Switch(
+                                checked = state.askModeEnabled,
+                                onCheckedChange = onSetAskModeEnabled,
+                            )
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                        Text("Action Confirmation Controls", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Destructive Commands", fontWeight = FontWeight.Medium, fontSize = 12.5.sp)
+                                Text("Prompt before rm -rf, git reset, or overwrite commands", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = state.confirmDestructiveCommands,
+                                onCheckedChange = onSetConfirmDestructiveCommands,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("File Deletion", fontWeight = FontWeight.Medium, fontSize = 12.5.sp)
+                                Text("Require approval when AI deletes project files", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = state.confirmFileDeletion,
+                                onCheckedChange = onSetConfirmFileDeletion,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Git Push Safeguard", fontWeight = FontWeight.Medium, fontSize = 12.5.sp)
+                                Text("Prompt for confirmation before pushing commits to remotes", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = state.confirmGitPush,
+                                onCheckedChange = onSetConfirmGitPush,
+                            )
+                        }
                     }
                 }
             }

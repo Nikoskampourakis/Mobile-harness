@@ -61,10 +61,10 @@ fun QuickModelSwitchSheet(
 
     val presetModels: List<String> = when (currentProvider.kind) {
         ProviderKind.GEMINI -> listOf(
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-2.0-pro-exp-02-05",
+            "gemini-3.5-flash",
+            "gemini-3.1-pro-preview",
+            "gemini-flash-latest",
+            "gemini-2.5-flash-image",
         )
         ProviderKind.ANTHROPIC -> listOf(
             "claude-sonnet-4-6",
@@ -85,7 +85,8 @@ fun QuickModelSwitchSheet(
         )
         ProviderKind.GROK -> listOf(
             "grok-3",
-            "grok-2-1212",
+            "grok-3-mini",
+            "grok-2-latest",
         )
         ProviderKind.KIMI -> listOf(
             "kimi-k2.6",
