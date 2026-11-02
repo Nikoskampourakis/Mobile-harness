@@ -771,6 +771,8 @@ private fun AppDrawerContent(
     onRenameChat: (String, String, String) -> Unit,
     onUpdateChatIcon: (String, String, String?) -> Unit,
     onOpenProjectFiles: (Project) -> Unit,
+    onOpenSkills: () -> Unit = {},
+    onOpenUiStyles: () -> Unit = {},
 ) {
     var customizeTarget by remember { mutableStateOf<CustomizeTarget?>(null) }
     var projectPathTarget by remember { mutableStateOf<Project?>(null) }
@@ -944,6 +946,37 @@ private fun AppDrawerContent(
             icon = { Icon(Icons.Default.SmartToy, null) }
         )
         NavigationDrawerItem(
+            label = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Developer Skills", modifier = Modifier.weight(1f))
+                    val count = state.skills.count { it.isEnabled }
+                    if (count > 0) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                        ) {
+                            Text(
+                                "$count",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            },
+            selected = false,
+            onClick = onOpenSkills,
+            icon = { Icon(Icons.Default.Extension, null) }
+        )
+        NavigationDrawerItem(
+            label = { Text("UI Styles & Themes") },
+            selected = false,
+            onClick = onOpenUiStyles,
+            icon = { Icon(Icons.Default.Palette, null) }
+        )
+        NavigationDrawerItem(
             label = { Text("Settings") },
             selected = false,
             onClick = { onNavigate(RootScreen.SETTINGS) },
@@ -1099,6 +1132,14 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
                     onOpenProjectFiles = { project ->
                         scope.launch { drawerState.close() }
                         viewModel.openProject(project)
+                    },
+                    onOpenSkills = {
+                        scope.launch { drawerState.close() }
+                        viewModel.toggleSkillsModal(true)
+                    },
+                    onOpenUiStyles = {
+                        scope.launch { drawerState.close() }
+                        viewModel.toggleUiStyleModal(true)
                     }
                 )
             }
@@ -1279,6 +1320,8 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onResetTerminalProfile = viewModel::resetTerminalProfile,
             onRefreshProcesses = viewModel::refreshActiveProcesses,
             onTalkToAgentThroughTerminal = { prompt -> viewModel.talkToAgentThroughTerminal(state.activeTerminalSessionId, prompt) },
+            onOpenSkills = { viewModel.toggleSkillsModal(true) },
+            onOpenUiStyles = { viewModel.toggleUiStyleModal(true) },
         )
         else -> RootScreenHost(
             state,
@@ -1287,6 +1330,28 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             screen = currentRootScreen,
             onScreenChange = { currentRootScreen = it },
             onOpenDrawer = { scope.launch { drawerState.open() } }
+        )
+    }
+
+    if (state.showSkillsModal) {
+        SkillsManagerModalSheet(
+            skills = state.skills,
+            onDismiss = { viewModel.toggleSkillsModal(false) },
+            onToggleSkill = viewModel::toggleSkill,
+            onAddCustomSkill = viewModel::addCustomSkill,
+            onRemoveSkill = viewModel::removeSkill,
+            onUpdateSkillConfig = viewModel::updateSkillConfig,
+            onResetToDefaults = viewModel::resetSkillsToDefault,
+        )
+    }
+
+    if (state.showUiStyleModal) {
+        UiStylePickerSheet(
+            currentColorTheme = state.colorTheme,
+            onSelectColorTheme = viewModel::setColorTheme,
+            currentThemeMode = state.themeMode,
+            onSelectThemeMode = viewModel::setThemeMode,
+            onDismiss = { viewModel.toggleUiStyleModal(false) },
         )
     }
 }
@@ -2104,6 +2169,7 @@ private const val CORE_RUNTIME_DOWNLOAD_MB = 69
 private const val CLAUDE_RUNTIME_DOWNLOAD_MB = 72
 private const val DSH_RUNTIME_DOWNLOAD_MB = 27
 private const val AGY_RUNTIME_DOWNLOAD_MB = 40
+private const val CODEX_RUNTIME_DOWNLOAD_MB = 65
 private const val PYTHON_RUNTIME_DOWNLOAD_MB = 55
 private const val ANDROID_RUNTIME_DOWNLOAD_MB = 570
 
@@ -2144,6 +2210,7 @@ private fun toolchainDownloadSummary(selected: Set<DevStack>, agent: AgentKind):
             AgentKind.CLAUDE_CODE -> CLAUDE_RUNTIME_DOWNLOAD_MB
             AgentKind.DEEPSEEK_HARNESS -> DSH_RUNTIME_DOWNLOAD_MB
             AgentKind.ANTIGRAVITY -> AGY_RUNTIME_DOWNLOAD_MB
+            AgentKind.CODEX_CLI -> CODEX_RUNTIME_DOWNLOAD_MB
         } +
         (if (DevStack.PYTHON in selected) PYTHON_RUNTIME_DOWNLOAD_MB else 0) +
         (if (DevStack.ANDROID in selected) ANDROID_RUNTIME_DOWNLOAD_MB else 0)
@@ -2229,11 +2296,13 @@ private fun AgentChoiceRow(
         AgentKind.CLAUDE_CODE -> Color(0xFFD97757)
         AgentKind.DEEPSEEK_HARNESS -> Color(0xFF4D6BFE)
         AgentKind.ANTIGRAVITY -> Color(0xFF4285F4)
+        AgentKind.CODEX_CLI -> Color(0xFF10A37F)
     }
     val mark = when (agent) {
         AgentKind.CLAUDE_CODE -> "CC"
         AgentKind.DEEPSEEK_HARNESS -> "DS"
         AgentKind.ANTIGRAVITY -> "AG"
+        AgentKind.CODEX_CLI -> "CX"
     }
     Row(
         modifier = Modifier
@@ -3567,6 +3636,9 @@ private fun ProviderChoiceRow(
         ProviderKind.KIMI -> Color(0xFF8B7CF6)
         ProviderKind.OPENCODE_ZEN -> Color(0xFF22C55E)
         ProviderKind.NVIDIA_NIM -> Color(0xFF76B900)
+        ProviderKind.OPENCLAW -> Color(0xFF06B6D4)
+        ProviderKind.HERMES -> Color(0xFF8B5CF6)
+        ProviderKind.CODEX -> Color(0xFF10A37F)
         ProviderKind.CUSTOM -> PocketOrange
     }
     val mark = when (provider) {
@@ -3579,6 +3651,9 @@ private fun ProviderChoiceRow(
         ProviderKind.KIMI -> "K"
         ProviderKind.OPENCODE_ZEN -> "Z"
         ProviderKind.NVIDIA_NIM -> "NV"
+        ProviderKind.OPENCLAW -> "OC"
+        ProviderKind.HERMES -> "H"
+        ProviderKind.CODEX -> "CX"
         ProviderKind.CUSTOM -> "<>"
     }
 
@@ -3608,6 +3683,21 @@ private fun ProviderChoiceRow(
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
+                if (provider.isSubscription) {
+                    Spacer(Modifier.width(6.dp))
+                    Surface(
+                        color = Color(0xFF10B981).copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(5.dp),
+                    ) {
+                        Text(
+                            "Subscription",
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                            color = Color(0xFF10B981),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
                 if (provider.experimental) {
                     Spacer(Modifier.width(6.dp))
                     Surface(
@@ -4925,6 +5015,8 @@ private fun WorkspaceScreen(
     onResetTerminalProfile: (String) -> Unit = {},
     onRefreshProcesses: () -> Unit = {},
     onTalkToAgentThroughTerminal: (String) -> Unit = {},
+    onOpenSkills: () -> Unit = {},
+    onOpenUiStyles: () -> Unit = {},
 ) {
     var showAndroidDashboard by rememberSaveable { mutableStateOf(false) }
     var customizeTarget by remember { mutableStateOf<CustomizeTarget?>(null) }
@@ -5262,6 +5354,38 @@ private fun WorkspaceScreen(
                         Icon(
                             Icons.Default.History,
                             contentDescription = "Project chats history",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val enabledSkillsCount = state.skills.count { it.isEnabled }
+                    IconButton(
+                        onClick = onOpenSkills,
+                    ) {
+                        BadgedBox(
+                            badge = {
+                                if (enabledSkillsCount > 0) {
+                                    Badge(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                    ) {
+                                        Text("$enabledSkillsCount", fontSize = 9.sp)
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Extension,
+                                contentDescription = "Skills Hub",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onOpenUiStyles,
+                    ) {
+                        Icon(
+                            Icons.Default.Palette,
+                            contentDescription = "UI Styles & Themes",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }

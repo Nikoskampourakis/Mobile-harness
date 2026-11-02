@@ -74,7 +74,9 @@ import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.network.GitHubRepository
+import com.jarves.mh.model.AgentSkill
 import com.jarves.mh.runtime.ClaudeRuntimeBridge
+import com.jarves.mh.runtime.CodexRuntimeBridge
 import com.jarves.mh.runtime.DshRuntimeBridge
 import com.jarves.mh.runtime.AgentRegistry
 import com.jarves.mh.runtime.AgentUpdateInfo
@@ -473,6 +475,9 @@ data class AppUiState(
         PlanningGoal(title = "Bonus: Process Monitor & Terminal Agent", description = "Active process manager and terminal agent conversation", isCompleted = true),
     ),
     val showPlanningGoalDetails: Boolean = false,
+    val skills: List<AgentSkill> = AgentSkill.defaultSkills(),
+    val showSkillsModal: Boolean = false,
+    val showUiStyleModal: Boolean = false,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -494,8 +499,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val vault = ApiKeyVault(application)
     private val preferences = AppPreferences(application)
-    private val claudeRuntime = ClaudeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
+    private val claudeRuntime = ClaudeRuntimeBridge(
+        application,
+        secretFor = { profile -> vault.get(profile.kind.name) },
+        activeSkillsProvider = { _state.value.skills.filter { it.isEnabled } },
+    )
     private val dshRuntime = DshRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
+    private val codexRuntime = CodexRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val installer = RuntimeInstaller(application)
     private val antigravityRuntime = AntigravityRuntimeBridge(
         application,
@@ -508,7 +518,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.value.activeChatId?.let { preferences.saveAgentConversation(AgentKind.ANTIGRAVITY, projectId, it, id) }
         },
     )
-    private val agentRegistry = AgentRegistry.builtIns(claudeRuntime, dshRuntime, antigravityRuntime)
+    private val agentRegistry = AgentRegistry.builtIns(claudeRuntime, dshRuntime, antigravityRuntime, codexRuntime)
     private fun activeRuntime(): com.jarves.mh.runtime.RuntimeBridge = agentRegistry.require(_state.value.agentKind).runtime
     private val providerApi = ProviderApiClient(application)
     private fun appUpdater(): AppUpdater = AppUpdater(
@@ -1262,6 +1272,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching { claudeRuntime.stopActiveSession() }
                 runCatching { dshRuntime.stopActiveSession() }
                 runCatching { antigravityRuntime.stopActiveSession() }
+                runCatching { codexRuntime.stopActiveSession() }
             }
             if (!current.projectTerminalRunning) {
                 projectTerminalProcess?.takeIf(Process::isAlive)?.destroyForcibly()
@@ -2423,11 +2434,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         claudeRuntime.configureProjectRoot(projectId, rootPath)
         dshRuntime.configureProjectRoot(projectId, rootPath)
         antigravityRuntime.configureProjectRoot(projectId, rootPath)
+        codexRuntime.configureProjectRoot(projectId, rootPath)
     }
 
     init {
         viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
         viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
+        viewModelScope.launch { codexRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch { bootstrap() }
         val savedColorTheme = runCatching { AppColorTheme.valueOf(preferences.colorTheme.uppercase()) }.getOrDefault(AppColorTheme.AMBER)
         _state.update {
@@ -5904,6 +5917,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _persistentPackages.value = current
         preferences.persistentPackages = current
         _state.update { it.copy(persistentPackages = current) }
+    }
+
+    fun toggleSkill(skillId: String) {
+        _state.update { current ->
+            val updated = current.skills.map { skill ->
+                if (skill.id == skillId) skill.copy(isEnabled = !skill.isEnabled) else skill
+            }
+            current.copy(skills = updated)
+        }
+    }
+
+    fun addCustomSkill(skill: AgentSkill) {
+        _state.update { current ->
+            val exists = current.skills.any { it.id == skill.id }
+            val updated = if (exists) {
+                current.skills.map { if (it.id == skill.id) skill else it }
+            } else {
+                current.skills + skill
+            }
+            current.copy(skills = updated)
+        }
+    }
+
+    fun removeSkill(skillId: String) {
+        _state.update { current ->
+            current.copy(skills = current.skills.filterNot { it.id == skillId })
+        }
+    }
+
+    fun updateSkillConfig(skillId: String, envConfig: Map<String, String>) {
+        _state.update { current ->
+            val updated = current.skills.map { skill ->
+                if (skill.id == skillId) skill.copy(envConfig = envConfig) else skill
+            }
+            current.copy(skills = updated)
+        }
+    }
+
+    fun resetSkillsToDefault() {
+        _state.update { current ->
+            current.copy(skills = AgentSkill.defaultSkills())
+        }
+    }
+
+    fun toggleSkillsModal(show: Boolean? = null) {
+        _state.update { current ->
+            current.copy(showSkillsModal = show ?: !current.showSkillsModal)
+        }
+    }
+
+    fun toggleUiStyleModal(show: Boolean? = null) {
+        _state.update { current ->
+            current.copy(showUiStyleModal = show ?: !current.showUiStyleModal)
+        }
     }
 
     fun setAutoInstallPersistentPackages(enabled: Boolean) {

@@ -83,6 +83,9 @@ object RuntimeLaunchConfigBuilder {
             }
             com.jarves.mh.model.ProviderProtocol.OPENAI_RESPONSES,
             com.jarves.mh.model.ProviderProtocol.OPENAI_CHAT,
+            com.jarves.mh.model.ProviderProtocol.OPENCLAW_SUBSCRIPTION,
+            com.jarves.mh.model.ProviderProtocol.HERMES_SUBSCRIPTION,
+            com.jarves.mh.model.ProviderProtocol.CODEX_SUBSCRIPTION,
             -> {
                 require(!localGatewayUrl.isNullOrBlank()) { "A local format gateway is required for this provider" }
                 environment["ANTHROPIC_BASE_URL"] = localGatewayUrl.trimEnd('/')

@@ -70,6 +70,7 @@ internal object ProviderRuntimeErrorDetector {
 class ClaudeRuntimeBridge(
     private val context: Context,
     private val secretFor: (ProviderProfile) -> String?,
+    private val activeSkillsProvider: () -> List<com.jarves.mh.model.AgentSkill> = { emptyList() },
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
@@ -148,6 +149,9 @@ class ClaudeRuntimeBridge(
             formatGateway = if (provider.kind.protocol in setOf(
                     com.jarves.mh.model.ProviderProtocol.OPENAI_CHAT,
                     com.jarves.mh.model.ProviderProtocol.OPENAI_RESPONSES,
+                    com.jarves.mh.model.ProviderProtocol.OPENCLAW_SUBSCRIPTION,
+                    com.jarves.mh.model.ProviderProtocol.HERMES_SUBSCRIPTION,
+                    com.jarves.mh.model.ProviderProtocol.CODEX_SUBSCRIPTION,
                 )) LocalFormatGateway(provider, secret).start() else null
             openRouterGateway = if (
                 provider.kind == ProviderKind.LLM_ROUTER && provider.openRouterProviders.isNotEmpty()
@@ -708,6 +712,22 @@ class ClaudeRuntimeBridge(
         sb.appendLine("For local servers, give a clear start command and never use a kill command that searches its own command text with pgrep, because it can terminate the terminal itself.")
         sb.appendLine("</project_workspace>")
         sb.appendLine()
+        val activeSkills = activeSkillsProvider()
+        if (activeSkills.isNotEmpty()) {
+            sb.appendLine("<active_developer_skills>")
+            sb.appendLine("The following specialized developer skills are currently active:")
+            for (skill in activeSkills) {
+                sb.appendLine("- **${skill.name}** [${skill.category.displayName}]: ${skill.description}")
+                if (skill.systemPromptInstructions.isNotBlank()) {
+                    sb.appendLine("  Directives: ${skill.systemPromptInstructions.replace("\n", " ")}")
+                }
+                if (skill.tools.isNotEmpty()) {
+                    sb.appendLine("  Available tools: ${skill.tools.joinToString(", ") { it.name }}")
+                }
+            }
+            sb.appendLine("</active_developer_skills>")
+            sb.appendLine()
+        }
         if (priorMessages.isEmpty()) {
             sb.appendLine(currentPrompt)
             return sb.toString()

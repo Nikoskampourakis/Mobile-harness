@@ -782,7 +782,10 @@ internal object DshRouteMapper {
                 defaultModel = model,
                 custom = DshCustomRoute("openai-completions", profile.resolvedBaseUrl),
             )
-            ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by DeepSeek Harness")
+            ProviderKind.CLAUDE,
+            ProviderKind.OPENCLAW,
+            ProviderKind.HERMES,
+            ProviderKind.CODEX -> throw IllegalArgumentException("${profile.kind.title} subscription login is managed by Claude Code / Codex CLI")
         }
     }
 }

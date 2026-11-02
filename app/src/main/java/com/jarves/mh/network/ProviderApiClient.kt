@@ -213,7 +213,8 @@ class ProviderApiClient(private val context: Context? = null) {
         val withoutAnthropic = base.removeSuffix("/anthropic")
         val candidates = when (protocol) {
             ProviderProtocol.OPENROUTER -> listOf("$base/v1/models")
-            ProviderProtocol.OPENAI_CHAT, ProviderProtocol.OPENAI_RESPONSES -> listOf("$base/models")
+            ProviderProtocol.OPENAI_CHAT, ProviderProtocol.OPENAI_RESPONSES,
+            ProviderProtocol.OPENCLAW_SUBSCRIPTION, ProviderProtocol.HERMES_SUBSCRIPTION, ProviderProtocol.CODEX_SUBSCRIPTION -> listOf("$base/models", "$base/v1/models")
             else -> listOf("$base/v1/models", "$base/models", "$withoutAnthropic/models", "$withoutAnthropic/v1/models")
         }
         return candidates.distinct()
@@ -223,7 +224,10 @@ class ProviderApiClient(private val context: Context? = null) {
         val base = baseUrl.trim().trimEnd('/')
         return when (protocol) {
             ProviderProtocol.OPENROUTER -> "$base/v1/messages"
-            ProviderProtocol.OPENAI_CHAT -> "$base/chat/completions"
+            ProviderProtocol.OPENAI_CHAT,
+            ProviderProtocol.OPENCLAW_SUBSCRIPTION,
+            ProviderProtocol.HERMES_SUBSCRIPTION,
+            ProviderProtocol.CODEX_SUBSCRIPTION -> "$base/chat/completions"
             ProviderProtocol.OPENAI_RESPONSES -> "$base/responses"
             else -> if (base.endsWith("/v1")) "$base/messages" else "$base/v1/messages"
         }
@@ -259,7 +263,10 @@ class ProviderApiClient(private val context: Context? = null) {
                 ),
             )
             .toString()
-        ProviderProtocol.OPENAI_CHAT -> JSONObject()
+        ProviderProtocol.OPENAI_CHAT,
+        ProviderProtocol.OPENCLAW_SUBSCRIPTION,
+        ProviderProtocol.HERMES_SUBSCRIPTION,
+        ProviderProtocol.CODEX_SUBSCRIPTION -> JSONObject()
             .put("model", model)
             .put("max_tokens", VALIDATION_MAX_TOKENS)
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "Reply OK")))

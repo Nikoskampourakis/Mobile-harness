@@ -8,6 +8,9 @@ import kotlin.random.Random
 
 enum class ProviderProtocol {
     CLAUDE_LOGIN,
+    OPENCLAW_SUBSCRIPTION,
+    HERMES_SUBSCRIPTION,
+    CODEX_SUBSCRIPTION,
     ANTHROPIC,
     ANTHROPIC_GATEWAY,
     OPENROUTER,
@@ -26,6 +29,9 @@ enum class ProviderKind(
     val fixedProtocol: Boolean = false,
 ) {
     CLAUDE("Claude subscription", "Pro, Max, Team or Enterprise", ProviderProtocol.CLAUDE_LOGIN, "", "default"),
+    OPENCLAW("OpenClaw Subscription", "OpenClaw Pro/Team subscription session", ProviderProtocol.OPENCLAW_SUBSCRIPTION, "https://api.openclaw.ai/v1", "openclaw-ultra-1"),
+    HERMES("Hermes Agent", "Nous Research Hermes subscription & gateway", ProviderProtocol.HERMES_SUBSCRIPTION, "https://hermes.nousresearch.com/v1", "hermes-3-llama-3.1-405b"),
+    CODEX("Codex Subscription", "OpenAI Codex developer subscription session", ProviderProtocol.CODEX_SUBSCRIPTION, "https://api.openai.com/v1", "codex-1"),
     ANTHROPIC("Anthropic API", "Usage billed through Console", ProviderProtocol.ANTHROPIC, "https://api.anthropic.com", "claude-sonnet-4-6"),
     LLM_ROUTER("OpenRouter", "Use your OpenRouter API key", ProviderProtocol.OPENROUTER, "https://openrouter.ai/api", "~anthropic/claude-sonnet-latest"),
     DEEPSEEK("DeepSeek", "Use your DeepSeek API key", ProviderProtocol.ANTHROPIC_GATEWAY, "https://api.deepseek.com/anthropic", "deepseek-v4-flash"),
@@ -65,6 +71,14 @@ enum class ProviderKind(
     CUSTOM("Custom API", "Anthropic-compatible endpoint", ProviderProtocol.ANTHROPIC_GATEWAY, "", "", true),
 }
 
+val ProviderKind.isSubscription: Boolean
+    get() = protocol in setOf(
+        ProviderProtocol.CLAUDE_LOGIN,
+        ProviderProtocol.OPENCLAW_SUBSCRIPTION,
+        ProviderProtocol.HERMES_SUBSCRIPTION,
+        ProviderProtocol.CODEX_SUBSCRIPTION,
+    )
+
 /**
  * Coding agent engine installed in the private Linux runtime.
  * Each coding agent is installed independently on demand over the shared Core runtime.
@@ -93,6 +107,12 @@ enum class AgentKind(
         "Google's official coding agent · Google account",
         "39.9 MB",
     ),
+    CODEX_CLI(
+        "codex-cli",
+        "Codex CLI",
+        "OpenAI's official developer CLI · OpenAI / Codex login",
+        "48.2 MB",
+    ),
     ;
 
     val description: String get() = subtitle
@@ -100,6 +120,7 @@ enum class AgentKind(
         CLAUDE_CODE -> "@anthropic-ai/claude-code"
         DEEPSEEK_HARNESS -> "@deepseek-ai/dsh"
         ANTIGRAVITY -> "@google/antigravity-cli"
+        CODEX_CLI -> "@openai/codex"
     }
 
     companion object {
@@ -117,6 +138,8 @@ val DEEPSEEK_HARNESS_PROVIDERS: Set<ProviderKind> = setOf(
     ProviderKind.KIMI,
     ProviderKind.OPENCODE_ZEN,
     ProviderKind.NVIDIA_NIM,
+    ProviderKind.GEMINI,
+    ProviderKind.GROK,
     ProviderKind.CUSTOM,
 )
 
@@ -124,12 +147,14 @@ val DSH_PROTOCOL_PROVIDERS: Set<ProviderKind> = setOf(
     ProviderKind.KIMI,
     ProviderKind.OPENCODE_ZEN,
     ProviderKind.NVIDIA_NIM,
+    ProviderKind.GEMINI,
+    ProviderKind.GROK,
     ProviderKind.CUSTOM,
 )
 
 fun defaultDshApiForProvider(kind: ProviderKind): String = when (kind) {
     ProviderKind.OPENCODE_ZEN -> "openai-responses"
-    ProviderKind.NVIDIA_NIM -> "openai-completions"
+    ProviderKind.NVIDIA_NIM, ProviderKind.GEMINI, ProviderKind.GROK -> "openai-completions"
     else -> "anthropic-messages"
 }
 
@@ -164,6 +189,15 @@ fun providerProtocolForAgent(profile: ProviderProfile, agent: AgentKind): Provid
 fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
     AgentKind.DEEPSEEK_HARNESS -> ProviderKind.entries.filter { it in DEEPSEEK_HARNESS_PROVIDERS }
     AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN }
+    AgentKind.CODEX_CLI -> listOf(
+        ProviderKind.CODEX,
+        ProviderKind.OPENCLAW,
+        ProviderKind.HERMES,
+        ProviderKind.GEMINI,
+        ProviderKind.GROK,
+        ProviderKind.NVIDIA_NIM,
+        ProviderKind.CUSTOM,
+    )
     AgentKind.ANTIGRAVITY -> emptyList()
 }
 
