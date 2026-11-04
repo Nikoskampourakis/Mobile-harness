@@ -44,6 +44,7 @@
     <string name="rt_install_preparing_bridge">Preparing the Android runtime bridge</string>
     <string name="rt_install_runtime_ready">Private runtime is ready</string>
     <string name="rt_install_download_failed_http">Download failed with HTTP %1$d</string>
+    <string name="rt_install_configuring_persistent">Configuring persistent packages…</string>
     <string name="rt_setup_preparing_workspace">Preparing your private coding workspace</string>
     <string name="rt_setup_ready">Mobile Harness is ready</string>
     <string name="rt_setup_offline">Connect to Wi-Fi or mobile data, then resume setup.</string>

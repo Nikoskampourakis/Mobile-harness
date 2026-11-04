@@ -58,11 +58,16 @@ import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import com.jarves.mh.ui.theme.PocketGreen
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -122,7 +127,7 @@ import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { APPEARANCE, LANGUAGE, TTS, TOOLS, PACKAGES, CUSTOMIZATION, RUNTIME, DIAGNOSTICS, UPDATE_CHANNEL }
+private enum class SettingsSection { APPEARANCE, LANGUAGE, TTS, TOOLS, PACKAGES, STORAGE, CUSTOMIZATION, RUNTIME, DIAGNOSTICS, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -137,6 +142,9 @@ fun SettingsScreen(
     onRefreshDiagnostics: () -> Unit = {},
     onStopInactiveProcesses: () -> Unit = {},
     onClearRuntimeCache: () -> Unit = {},
+    onCleanPackageCaches: () -> Unit = {},
+    onPruneWorkspaceBuildCaches: () -> Unit = {},
+    onCleanReinstallRuntime: () -> Unit = {},
     onPing: () -> Unit,
     onClearTerminal: () -> Unit,
     getSavedApiKey: (ProviderKind) -> String,
@@ -184,22 +192,84 @@ fun SettingsScreen(
     var showReliabilityHelp by rememberSaveable { mutableStateOf(false) }
     var stackPendingRemoval by remember { mutableStateOf<DevStack?>(null) }
 
-    stackPendingRemoval?.let { stack ->
+    var showCleanReinstallDialog by rememberSaveable { mutableStateOf(false) }
+    var showPruneWorkspaceDialog by rememberSaveable { mutableStateOf(false) }
+
+    if (showCleanReinstallDialog) {
         AlertDialog(
-            onDismissRequest = { stackPendingRemoval = null },
-            title = { Text("Remove ${stack.label}?") },
+            onDismissRequest = { showCleanReinstallDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Clean Reinstall Linux Runtime?")
+                }
+            },
             text = {
-                Text("This removes the toolchain and its runtime caches to free storage. Your projects and source files will not be deleted.")
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "This removes the bloated Linux runtime rootfs (~1–2 GB) and package caches to recover maximum phone storage, then reinstalls a pristine minimal environment.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text(
+                            "✓ All your projects, code, git history, chats, and API keys are 100% safe and preserved.",
+                            modifier = Modifier.padding(10.dp),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
             },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
-                        stackPendingRemoval = null
-                        onRemoveDevStack(stack)
+                        showCleanReinstallDialog = false
+                        onCleanReinstallRuntime()
                     },
-                ) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) {
+                    Text("Reinstall Cleanly")
+                }
             },
-            dismissButton = { TextButton(onClick = { stackPendingRemoval = null }) { Text("Cancel") } },
+            dismissButton = {
+                TextButton(onClick = { showCleanReinstallDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    if (showPruneWorkspaceDialog) {
+        AlertDialog(
+            onDismissRequest = { showPruneWorkspaceDialog = false },
+            title = { Text("Prune Workspace Build Caches?") },
+            text = {
+                Text(
+                    "This cleans temporary build/ and .gradle/ artifacts across all project workspaces. Your source code, git commits, project files, and chat history will remain completely untouched.",
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showPruneWorkspaceDialog = false
+                        onPruneWorkspaceBuildCaches()
+                    },
+                ) {
+                    Text("Prune Caches")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPruneWorkspaceDialog = false }) {
+                    Text("Cancel")
+                }
+            },
         )
     }
 
@@ -355,6 +425,28 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+
+            item {
+                SettingsAccordion(
+                    title = "Storage & Space Recovery",
+                    subtitle = "Clean caches, prune build artifacts, or reinstall clean runtime",
+                    icon = Icons.Default.Storage,
+                    expanded = expanded == SettingsSection.STORAGE,
+                    onClick = {
+                        val opening = expanded != SettingsSection.STORAGE
+                        toggle(SettingsSection.STORAGE)
+                        if (opening) onRefreshDiagnostics()
+                    },
+                ) {
+                    StorageRecoveryContent(
+                        state = state,
+                        onCleanPackageCaches = onCleanPackageCaches,
+                        onPruneWorkspaceBuildCaches = { showPruneWorkspaceDialog = true },
+                        onCleanReinstallRuntime = { showCleanReinstallDialog = true },
+                        onRefresh = onRefreshDiagnostics,
+                    )
                 }
             }
 
@@ -1071,9 +1163,140 @@ private fun formatTransferEta(downloaded: Long, total: Long, bytesPerSecond: Lon
 }
 
 private fun formatDiagnosticBytes(bytes: Long): String = when {
+    bytes >= 1_073_741_824L -> "%.2f GB".format(bytes / 1_073_741_824.0)
     bytes >= 1_048_576L -> "%.1f MB".format(bytes / 1_048_576.0)
     bytes >= 1_024L -> "%.1f KB".format(bytes / 1_024.0)
     else -> "$bytes B"
+}
+
+@Composable
+private fun StorageRecoveryContent(
+    state: AppUiState,
+    onCleanPackageCaches: () -> Unit,
+    onPruneWorkspaceBuildCaches: () -> Unit,
+    onCleanReinstallRuntime: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val diagnostics = state.diagnostics
+    val breakdown = diagnostics.storageBreakdown
+    val busy = state.isRunning || state.projectTerminalRunning || state.androidBuildRunning
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Storage Breakdown",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            TextButton(onClick = onRefresh, enabled = !diagnostics.loading) {
+                if (diagnostics.loading) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(4.dp))
+                Text("Scan", fontSize = 12.sp)
+            }
+        }
+
+        DiagnosticsCard("Storage Distribution") {
+            RuntimeInfoRow("Projects & Workspace Code", formatDiagnosticBytes(breakdown.projectBytes))
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            ) {
+                Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Check, null, tint = PocketGreen, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "All source files, git commits, project files & chats are safely kept here.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            Spacer(Modifier.height(6.dp))
+            RuntimeInfoRow("Linux Environment (Rootfs)", formatDiagnosticBytes(breakdown.runtimeBytes))
+            RuntimeInfoRow("Package Caches (APT, NPM, PIP)", formatDiagnosticBytes(breakdown.cacheBytes))
+            RuntimeInfoRow("Workspace Build Caches (build/, .gradle/)", formatDiagnosticBytes(breakdown.workspaceCacheBytes))
+            RuntimeInfoRow("Disposable Output Logs", formatDiagnosticBytes(breakdown.disposableOutputBytes))
+            Spacer(Modifier.height(4.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            Spacer(Modifier.height(6.dp))
+            RuntimeInfoRow("Total App Storage Used", formatDiagnosticBytes(breakdown.totalAppBytes))
+            RuntimeInfoRow("Free Phone Storage", formatDiagnosticBytes(breakdown.freeDeviceBytes))
+        }
+
+        DiagnosticsCard("Quick Space Recovery") {
+            Text(
+                "Cleans downloaded package archives, npm caches, pip wheels, and temporary logs without modifying any installed binaries or projects.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onCleanPackageCaches,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.DeleteSweep, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Clean Package & Download Caches")
+            }
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = onPruneWorkspaceBuildCaches,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Prune Project Build Caches")
+            }
+        }
+
+        DiagnosticsCard("Clean Reinstall Linux Runtime") {
+            Text(
+                "Has your Linux environment accumulated too many packages or heavy dependencies? Wipe the runtime completely and reinstall a pristine minimal environment.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Shield, null, tint = PocketGreen, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "100% Safe: Your projects, code, git history, chats, and API keys are completely preserved.",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = onCleanReinstallRuntime,
+                enabled = !busy,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Clean Reinstall Linux Runtime", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
 }
 
 @Composable

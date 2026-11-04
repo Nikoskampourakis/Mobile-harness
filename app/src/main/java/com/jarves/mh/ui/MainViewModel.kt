@@ -78,6 +78,11 @@ import com.jarves.mh.model.AgentSkill
 import com.jarves.mh.runtime.ClaudeRuntimeBridge
 import com.jarves.mh.runtime.CodexRuntimeBridge
 import com.jarves.mh.runtime.DshRuntimeBridge
+import com.jarves.mh.runtime.DetectedService
+import com.jarves.mh.runtime.PortDetector
+import com.jarves.mh.data.ProjectSecretEntry
+import com.jarves.mh.data.ProjectSecretManager
+import com.jarves.mh.ui.CodeEditorConfig
 import com.jarves.mh.runtime.AgentRegistry
 import com.jarves.mh.runtime.AgentUpdateInfo
 import com.jarves.mh.runtime.AntigravityAuthController
@@ -198,6 +203,7 @@ data class DeveloperDiagnostics(
     val logcatLines: Int = 0,
     val fileEntries: Int = 0,
     val runtimeCacheBytes: Long = 0L,
+    val storageBreakdown: com.jarves.mh.runtime.StorageBreakdown = com.jarves.mh.runtime.StorageBreakdown(),
     val recentExit: String? = null,
     val refreshedAtMillis: Long? = null,
 )
@@ -478,11 +484,17 @@ data class AppUiState(
     val skills: List<AgentSkill> = AgentSkill.defaultSkills(),
     val showSkillsModal: Boolean = false,
     val showUiStyleModal: Boolean = false,
+    val detectedServices: List<DetectedService> = emptyList(),
+    val projectSecrets: List<ProjectSecretEntry> = emptyList(),
+    val showProjectSecretsModal: Boolean = false,
+    val pendingApiKeyRequest: Pair<String, String>? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val ttsManager by lazy { TtsManager.getInstance(application) }
     private val checkpointManager by lazy { WorkspaceCheckpointManager(application) }
+    private val storageCleaner by lazy { com.jarves.mh.runtime.StorageCleaner(application) }
+    private val projectSecretManager by lazy { ProjectSecretManager(application) }
     private val shareServer by lazy { ProjectShareServer(application) }
     private val previewServer by lazy { LocalStaticPreviewServer(application) }
     private val _persistentPackages = MutableStateFlow<Set<String>>(emptySet())
@@ -598,6 +610,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            storageCleaner.autoCleanIfEnabled()
+            val services = PortDetector.detectListeningServices()
+            _state.update { it.copy(detectedServices = services) }
+        }
         viewModelScope.launch {
             AndroidAppInstaller.events.collect { event ->
                 if (event.operationId != pendingAndroidInstallId) return@collect
@@ -1312,6 +1329,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopInactiveProcesses() = stopInactiveDeveloperProcesses()
     fun clearRuntimeCache() = clearDeveloperRuntimeCache()
 
+    fun cleanPackageAndBuildCaches() {
+        if (_state.value.isRunning || _state.value.projectTerminalRunning || _state.value.androidBuildRunning) {
+            _state.update { it.copy(toastMessage = str(R.string.diagnostics_cache_busy)) }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val freed = storageCleaner.cleanPackageCaches()
+            val formatted = android.text.format.Formatter.formatShortFileSize(getApplication(), freed)
+            withContext(Dispatchers.Main) {
+                _state.update { it.copy(toastMessage = "Reclaimed $formatted of package and build cache storage!") }
+                lastDiagnosticsRefreshAtElapsedMillis = 0L
+                refreshDeveloperDiagnostics()
+            }
+        }
+    }
+
+    fun pruneWorkspaceBuildCaches() {
+        if (_state.value.isRunning || _state.value.projectTerminalRunning || _state.value.androidBuildRunning) {
+            _state.update { it.copy(toastMessage = str(R.string.diagnostics_cache_busy)) }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val freed = storageCleaner.pruneWorkspaceBuildCaches()
+            val formatted = android.text.format.Formatter.formatShortFileSize(getApplication(), freed)
+            withContext(Dispatchers.Main) {
+                _state.update { it.copy(toastMessage = "Reclaimed $formatted from project build folders! All source code and git history preserved.") }
+                lastDiagnosticsRefreshAtElapsedMillis = 0L
+                refreshDeveloperDiagnostics()
+            }
+        }
+    }
+
+    fun cleanReinstallLinuxRuntime() {
+        if (_state.value.isRunning || _state.value.projectTerminalRunning || _state.value.androidBuildRunning) {
+            _state.update { it.copy(toastMessage = str(R.string.diagnostics_cache_busy)) }
+            return
+        }
+        stopInactiveDeveloperProcesses()
+        viewModelScope.launch(Dispatchers.IO) {
+            storageCleaner.cleanReinstallRuntime()
+            withContext(Dispatchers.Main) {
+                _state.update {
+                    it.copy(
+                        activeProject = null,
+                        workspaceVisible = false,
+                        startupStage = StartupStage.SETUP_REQUIRED,
+                        startupError = null,
+                        toastMessage = "Runtime removed. Reinstalling pristine Linux environment...",
+                    )
+                }
+                startRuntimeSetup()
+            }
+        }
+    }
+
     /** Drops only rebuildable or already-persisted data when Android reports memory pressure. */
     fun releaseMemoryCaches() {
         folderMetadataCache.clear()
@@ -1343,6 +1415,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .asSequence()
             .filter { it.isFile && it.name.startsWith("runtime-output-") }
             .sumOf(File::length)
+        val storageBreakdown = storageCleaner.calculateBreakdown()
         return DeveloperDiagnostics(
             appPssBytes = memory.totalPss.toLong() * 1_024L,
             javaHeapBytes = runtime.totalMemory() - runtime.freeMemory(),
@@ -1356,6 +1429,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             logcatLines = current.androidLogcat.lines.size,
             fileEntries = current.workspaceFiles.size,
             runtimeCacheBytes = runtimeCache,
+            storageBreakdown = storageBreakdown,
             recentExit = recentAppExitSummary(),
             refreshedAtMillis = System.currentTimeMillis(),
         )
@@ -5971,6 +6045,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { current ->
             current.copy(showUiStyleModal = show ?: !current.showUiStyleModal)
         }
+    }
+
+    val editorWordWrap: Boolean get() = preferences.editorWordWrap
+    val editorFontSize: Int get() = preferences.editorFontSize
+    val editorShowLineNumbers: Boolean get() = preferences.editorShowLineNumbers
+    val editorShowMinimap: Boolean get() = preferences.editorShowMinimap
+    val editorStickyScroll: Boolean get() = preferences.editorStickyScroll
+    val editorCodeFolding: Boolean get() = preferences.editorCodeFolding
+    val editorIndentGuides: Boolean get() = preferences.editorIndentGuides
+
+    fun saveEditorConfig(config: CodeEditorConfig) {
+        preferences.editorWordWrap = config.wordWrap
+        preferences.editorFontSize = config.fontSizeSp
+        preferences.editorShowLineNumbers = config.showLineNumbers
+        preferences.editorShowMinimap = config.showMinimap
+        preferences.editorStickyScroll = config.stickyScroll
+        preferences.editorCodeFolding = config.codeFolding
+        preferences.editorIndentGuides = config.renderIndentGuides
+    }
+
+    fun refreshDetectedPorts() {
+        viewModelScope.launch {
+            val services = PortDetector.detectListeningServices()
+            _state.update { it.copy(detectedServices = services) }
+        }
+    }
+
+    fun openPreviewUrl(url: String) {
+        _state.update { it.copy(previewUrl = url, previewReady = true) }
+    }
+
+    fun loadProjectSecrets(projectId: String) {
+        val secrets = projectSecretManager.listSecrets(projectId)
+        _state.update { it.copy(projectSecrets = secrets) }
+    }
+
+    fun saveProjectSecret(projectId: String, keyName: String, value: String) {
+        projectSecretManager.saveSecret(projectId, keyName, value)
+        val secrets = projectSecretManager.listSecrets(projectId)
+        _state.update { it.copy(projectSecrets = secrets, toastMessage = "Saved encrypted secret $keyName") }
+    }
+
+    fun removeProjectSecret(projectId: String, keyName: String) {
+        projectSecretManager.removeSecret(projectId, keyName)
+        val secrets = projectSecretManager.listSecrets(projectId)
+        _state.update { it.copy(projectSecrets = secrets, toastMessage = "Removed $keyName") }
+    }
+
+    fun toggleProjectSecretsModal(show: Boolean? = null) {
+        val next = show ?: !_state.value.showProjectSecretsModal
+        val currentProject = _state.value.activeProject
+        if (next && currentProject != null) {
+            loadProjectSecrets(currentProject.id)
+        }
+        _state.update { it.copy(showProjectSecretsModal = next) }
+    }
+
+    fun requestApiKeyForWork(keyName: String, reason: String) {
+        _state.update { it.copy(pendingApiKeyRequest = keyName to reason) }
+    }
+
+    fun handleApiKeyResponse(keyName: String, secretValue: String) {
+        val currentProject = _state.value.activeProject
+        val projectId = currentProject?.id ?: "global"
+        saveProjectSecret(projectId, keyName, secretValue)
+        _state.update { it.copy(pendingApiKeyRequest = null) }
+    }
+
+    fun dismissApiKeyRequest() {
+        _state.update { it.copy(pendingApiKeyRequest = null) }
     }
 
     fun setAutoInstallPersistentPackages(enabled: Boolean) {

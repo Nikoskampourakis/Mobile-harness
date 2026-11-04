@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.jarves.mh.R
 import com.jarves.mh.ui.theme.AppLanguage
 import com.jarves.mh.ui.theme.AppThemeMode
+import com.jarves.mh.ui.theme.PocketGreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,6 +37,18 @@ internal fun InitialLanguageSetupScreen(
     onSelectLanguage: (String) -> Unit,
     onContinue: () -> Unit,
 ) {
+    val deviceLocale = remember { java.util.Locale.getDefault() }
+    val detectedCode = remember { deviceLocale.language.lowercase() }
+    val matchedLanguage = remember(detectedCode) {
+        AppLanguage.entries.firstOrNull { it.code.equals(detectedCode, ignoreCase = true) }
+    }
+
+    LaunchedEffect(matchedLanguage) {
+        if (currentLanguageCode.isBlank() && matchedLanguage != null && matchedLanguage != AppLanguage.SYSTEM) {
+            onSelectLanguage(matchedLanguage.code)
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -71,7 +84,7 @@ internal fun InitialLanguageSetupScreen(
                 Box(
                     Modifier
                         .size(44.dp)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(12.dp)),
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -90,43 +103,88 @@ internal fun InitialLanguageSetupScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
                 stringResource(R.string.language_welcome_subtitle),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
             )
-            Spacer(Modifier.height(20.dp))
+
+            // Auto-detected OS language badge
+            if (matchedLanguage != null && matchedLanguage != AppLanguage.SYSTEM) {
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Check, null, tint = PocketGreen, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Detected device language: ${matchedLanguage.displayName} (${matchedLanguage.nativeName})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
             ) {
                 Column {
                     AppLanguage.entries.forEachIndexed { index, lang ->
                         val isSelected = (currentLanguageCode == lang.code) ||
-                            (currentLanguageCode.isBlank() && lang == AppLanguage.SYSTEM)
+                            (currentLanguageCode.isBlank() && (lang.code == detectedCode || (matchedLanguage == null && lang == AppLanguage.SYSTEM)))
+                        val isDeviceLang = lang.code == detectedCode
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onSelectLanguage(lang.code) }
-                                .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent)
+                                .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else Color.Transparent)
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (lang == AppLanguage.SYSTEM) {
-                                        stringResource(R.string.language_system_default)
-                                    } else {
-                                        lang.nativeName
-                                    },
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 15.sp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = if (lang == AppLanguage.SYSTEM) {
+                                            stringResource(R.string.language_system_default)
+                                        } else {
+                                            lang.nativeName
+                                        },
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 15.sp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    if (isDeviceLang) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Surface(
+                                            color = PocketGreen.copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(4.dp),
+                                        ) {
+                                            Text(
+                                                "Device",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = PocketGreen,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                            )
+                                        }
+                                    }
+                                }
                                 if (lang != AppLanguage.SYSTEM) {
                                     Text(
                                         text = lang.displayName,

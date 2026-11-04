@@ -1322,6 +1322,23 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onTalkToAgentThroughTerminal = { prompt -> viewModel.talkToAgentThroughTerminal(state.activeTerminalSessionId, prompt) },
             onOpenSkills = { viewModel.toggleSkillsModal(true) },
             onOpenUiStyles = { viewModel.toggleUiStyleModal(true) },
+            onOpenProjectSecrets = {
+                val activeProj = state.activeProject
+                if (activeProj != null) viewModel.loadProjectSecrets(activeProj.id)
+                viewModel.toggleProjectSecretsModal(true)
+            },
+            onOpenPreviewUrl = viewModel::openPreviewUrl,
+            onRefreshDetectedPorts = viewModel::refreshDetectedPorts,
+            onSaveEditorConfig = viewModel::saveEditorConfig,
+            editorConfig = CodeEditorConfig(
+                wordWrap = viewModel.editorWordWrap,
+                fontSizeSp = viewModel.editorFontSize,
+                showLineNumbers = viewModel.editorShowLineNumbers,
+                showMinimap = viewModel.editorShowMinimap,
+                stickyScroll = viewModel.editorStickyScroll,
+                codeFolding = viewModel.editorCodeFolding,
+                renderIndentGuides = viewModel.editorIndentGuides,
+            ),
         )
         else -> RootScreenHost(
             state,
@@ -1352,6 +1369,33 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             currentThemeMode = state.themeMode,
             onSelectThemeMode = viewModel::setThemeMode,
             onDismiss = { viewModel.toggleUiStyleModal(false) },
+        )
+    }
+
+    if (state.showProjectSecretsModal) {
+        val currentProj = state.activeProject
+        ProjectSecretsModalSheet(
+            projectName = currentProj?.name ?: "App APIs & Secrets",
+            projectId = currentProj?.id ?: "global",
+            secrets = state.projectSecrets,
+            onSaveSecret = { key, valStr ->
+                viewModel.saveProjectSecret(currentProj?.id ?: "global", key, valStr)
+            },
+            onRemoveSecret = { key ->
+                viewModel.removeProjectSecret(currentProj?.id ?: "global", key)
+            },
+            onDismiss = { viewModel.toggleProjectSecretsModal(false) },
+        )
+    }
+
+    state.pendingApiKeyRequest?.let { (keyName, reason) ->
+        AgentApiKeyRequestDialog(
+            keyName = keyName,
+            reason = reason,
+            onConfirm = { secretVal ->
+                viewModel.handleApiKeyResponse(keyName, secretVal)
+            },
+            onDismiss = viewModel::dismissApiKeyRequest,
         )
     }
 }
@@ -3089,6 +3133,10 @@ private fun RootScreenHost(
                     onToggleTheme = viewModel::toggleTheme,
                     onInstallUpdate = viewModel::installAppUpdate,
                     onOpenDeviceFolder = { uri -> viewModel.createProjectFromExternalFolder(context, uri, "Imported Folder") },
+                    onOpenAppSecrets = {
+                        viewModel.loadProjectSecrets("global")
+                        viewModel.toggleProjectSecretsModal(true)
+                    },
                 )
                 RootScreen.AGENT -> AgentScreen(
                     state = state,
@@ -3159,6 +3207,9 @@ private fun RootScreenHost(
                     onRefreshDiagnostics = viewModel::refreshDiagnostics,
                     onStopInactiveProcesses = viewModel::stopInactiveProcesses,
                     onClearRuntimeCache = viewModel::clearRuntimeCache,
+                    onCleanPackageCaches = viewModel::cleanPackageAndBuildCaches,
+                    onPruneWorkspaceBuildCaches = viewModel::pruneWorkspaceBuildCaches,
+                    onCleanReinstallRuntime = viewModel::cleanReinstallLinuxRuntime,
                     onSetAiNickname = viewModel::setAiNickname,
                     onResetAiNickname = viewModel::resetAiNickname,
                     onSetWakeLockEnabled = viewModel::setWakeLockEnabled,
@@ -3561,25 +3612,76 @@ private fun ProviderChoiceStep(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp,
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
+
+        var filterMode by rememberSaveable { mutableStateOf("ALL") }
+        val subCount = visibleProviders.count { it.isSubscription }
+        val apiCount = visibleProviders.count { !it.isSubscription }
+        val filteredProviders = remember(visibleProviders, filterMode) {
+            when (filterMode) {
+                "SUBSCRIPTIONS" -> visibleProviders.filter { it.isSubscription }
+                "APIS" -> visibleProviders.filter { !it.isSubscription }
+                else -> visibleProviders
+            }
+        }
+
+        // Filter pills row
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = filterMode == "ALL",
+                onClick = { filterMode = "ALL" },
+                label = { Text("All (${visibleProviders.size})", fontSize = 11.5.sp) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                ),
+            )
+            if (subCount > 0) {
+                FilterChip(
+                    selected = filterMode == "SUBSCRIPTIONS",
+                    onClick = { filterMode = "SUBSCRIPTIONS" },
+                    label = { Text("Subscriptions ($subCount)", fontSize = 11.5.sp) },
+                    leadingIcon = { Icon(Icons.Default.CreditCard, null, Modifier.size(13.dp)) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = PocketGreen.copy(alpha = 0.18f),
+                        selectedLabelColor = PocketGreen,
+                    ),
+                )
+            }
+            if (apiCount > 0) {
+                FilterChip(
+                    selected = filterMode == "APIS",
+                    onClick = { filterMode = "APIS" },
+                    label = { Text("API Keys ($apiCount)", fontSize = 11.5.sp) },
+                    leadingIcon = { Icon(Icons.Default.Key, null, Modifier.size(13.dp)) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        selectedLabelColor = MaterialTheme.colorScheme.primary,
+                    ),
+                )
+            }
+        }
 
         Surface(
             modifier = Modifier.fillMaxWidth().weight(1f),
             shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
         ) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(visibleProviders) { index, provider ->
+                itemsIndexed(filteredProviders) { index, provider ->
                     ProviderChoiceRow(
                         provider = provider,
                         selected = selected == provider,
                         onClick = { onSelected(provider) },
                     )
-                    if (index != visibleProviders.lastIndex) {
+                    if (index != filteredProviders.lastIndex) {
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 68.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
                         )
                     }
                 }
@@ -4161,6 +4263,7 @@ private fun ProjectsScreen(
     onToggleTheme: () -> Unit,
     onInstallUpdate: () -> Unit,
     onOpenDeviceFolder: (Uri) -> Unit = {},
+    onOpenAppSecrets: () -> Unit = {},
 ) {
     var showCreate by rememberSaveable { mutableStateOf(false) }
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
@@ -4189,6 +4292,11 @@ private fun ProjectsScreen(
             TopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
                 title = { Row(verticalAlignment = Alignment.CenterVertically) { BrandMark(compact = true); Spacer(Modifier.width(9.dp)); Text("Mobile Harness", fontWeight = FontWeight.Bold) } },
+                actions = {
+                    IconButton(onClick = onOpenAppSecrets) {
+                        Icon(Icons.Default.VpnKey, contentDescription = "App APIs & Secrets", tint = MaterialTheme.colorScheme.primary)
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -4247,6 +4355,34 @@ private fun ProjectsScreen(
                             maxLines = 1,
                             softWrap = false,
                         )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Surface(
+                    onClick = onOpenAppSecrets,
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.VpnKey, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("App APIs & Secrets", fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                            Text("Encrypted keys: Gemini, OpenAI, Stripe, Supabase", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -5017,6 +5153,11 @@ private fun WorkspaceScreen(
     onTalkToAgentThroughTerminal: (String) -> Unit = {},
     onOpenSkills: () -> Unit = {},
     onOpenUiStyles: () -> Unit = {},
+    onOpenProjectSecrets: () -> Unit = {},
+    onOpenPreviewUrl: (String) -> Unit = {},
+    onRefreshDetectedPorts: () -> Unit = {},
+    onSaveEditorConfig: (CodeEditorConfig) -> Unit = {},
+    editorConfig: CodeEditorConfig = CodeEditorConfig(),
 ) {
     var showAndroidDashboard by rememberSaveable { mutableStateOf(false) }
     var customizeTarget by remember { mutableStateOf<CustomizeTarget?>(null) }
@@ -5183,6 +5324,19 @@ private fun WorkspaceScreen(
         }
     }
 
+    var confettiTriggerKey by remember { mutableStateOf<String?>(null) }
+    var wasRunning by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.isRunning) {
+        if (wasRunning && !state.isRunning) {
+            val lastMsg = state.messages.lastOrNull { !it.fromUser }
+            if (lastMsg != null && lastMsg.text.isNotBlank() && !lastMsg.text.contains("error", ignoreCase = true)) {
+                confettiTriggerKey = lastMsg.id
+            }
+        }
+        wasRunning = state.isRunning
+    }
+
     var selectedTab by rememberSaveable { mutableStateOf(WorkspaceTab.CHAT) }
     val activeChat = state.projectChats.firstOrNull { it.id == state.activeChatId }
 
@@ -5192,10 +5346,12 @@ private fun WorkspaceScreen(
             onCloseFile()
             selectedTab = WorkspaceTab.FILES
         })
-        FileViewerScreen(
+        AdvancedCodeEditorScreen(
             filePath = state.openedFilePath,
             content = state.openedFileContent,
             loading = state.fileContentLoading,
+            initialConfig = editorConfig,
+            onConfigChanged = onSaveEditorConfig,
             onClose = {
                 onCloseFile()
                 selectedTab = WorkspaceTab.FILES
@@ -5386,6 +5542,15 @@ private fun WorkspaceScreen(
                         Icon(
                             Icons.Default.Palette,
                             contentDescription = "UI Styles & Themes",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(
+                        onClick = onOpenProjectSecrets,
+                    ) {
+                        Icon(
+                            Icons.Default.VpnKey,
+                            contentDescription = "Project API Keys & Secrets",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -5966,7 +6131,7 @@ private fun WorkspaceScreen(
                             )
                         }
                     )
-                    WorkspaceTab.PREVIEW -> PreviewTab(state.previewReady, state.previewUrl)
+                    WorkspaceTab.PREVIEW -> PreviewTab(state.previewReady, state.previewUrl, state.detectedServices, onRefreshDetectedPorts)
                 }
             if (state.ttsIsSpeaking) {
                 Surface(
@@ -6006,6 +6171,10 @@ private fun WorkspaceScreen(
                     }
                 }
             }
+            ConfettiCelebration(
+                triggerKey = confettiTriggerKey,
+                onFinished = { confettiTriggerKey = null },
+            )
         }
     }
 }
@@ -7047,6 +7216,8 @@ private fun ClaudeActivityDisclosure(
     autoCollapseOnFinish: Boolean = true,
 ) {
     var expandedItems by rememberSaveable { mutableStateOf(emptyList<Int>()) }
+    var hideCompleted by rememberSaveable { mutableStateOf(false) }
+
     LaunchedEffect(isRunning) {
         if (!isRunning && autoCollapseOnFinish) {
             expandedItems = emptyList()
@@ -7065,17 +7236,55 @@ private fun ClaudeActivityDisclosure(
             )
             if (0 in expandedItems) ActivityExpandedDetail(null, "Reviewing the request and planning the next action.")
         } else {
+            val completedCount = items.count { it.isComplete }
+            if (items.size > 1 && completedCount > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (hideCompleted) "$completedCount completed steps hidden" else "${items.size} steps",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.clickable { hideCompleted = !hideCompleted },
+                    ) {
+                        Row(Modifier.padding(horizontal = 7.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                if (hideCompleted) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                null,
+                                Modifier.size(11.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                if (hideCompleted) "Show all" else "Hide completed",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+
             items.forEachIndexed { index, item ->
-                ActivitySummaryRow(
-                    item = item,
-                    text = compactActivityText(item),
-                    expanded = index in expandedItems,
-                    showProgress = isRunning && !item.isComplete,
-                    onToggle = {
-                        expandedItems = if (index in expandedItems) expandedItems - index else expandedItems + index
-                    },
-                )
-                if (index in expandedItems) ActivityExpandedDetail(item, activityDetail(item))
+                if (!hideCompleted || !item.isComplete) {
+                    ActivitySummaryRow(
+                        item = item,
+                        text = compactActivityText(item),
+                        expanded = index in expandedItems,
+                        showProgress = isRunning && !item.isComplete,
+                        onToggle = {
+                            expandedItems = if (index in expandedItems) expandedItems - index else expandedItems + index
+                        },
+                    )
+                    if (index in expandedItems) ActivityExpandedDetail(item, activityDetail(item))
+                }
             }
         }
     }
@@ -7220,28 +7429,75 @@ private fun ActivitySummaryRow(
     onToggle: () -> Unit,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val detail = item?.detail.orEmpty()
+    val title = item?.title.orEmpty()
+    val isUsageFailure = detail.contains("rate limit", true) || detail.contains("quota", true) ||
+        detail.contains("usage", true) || detail.contains("credit", true) ||
+        detail.contains("billing", true) || title.contains("quota", true)
+    val isError = !isUsageFailure && (detail.contains("failed", true) || detail.contains("error", true) ||
+        detail.contains("exception", true) || title.contains("failed", true))
+    val isCompleted = item?.isComplete == true && !isError && !isUsageFailure
+
+    val rowBg = when {
+        isUsageFailure -> PocketOrange.copy(alpha = 0.12f)
+        isError -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.22f)
+        else -> Color.Transparent
+    }
+    val iconColor = when {
+        isUsageFailure -> PocketOrange
+        isError -> MaterialTheme.colorScheme.error
+        isCompleted -> PocketGreen
+        else -> muted
+    }
+    val textColor = when {
+        isUsageFailure -> PocketOrange
+        isError -> MaterialTheme.colorScheme.error
+        isCompleted -> muted.copy(alpha = 0.72f)
+        else -> muted
+    }
+    val textDecoration = if (isCompleted) androidx.compose.ui.text.style.TextDecoration.LineThrough else androidx.compose.ui.text.style.TextDecoration.None
+
+    Surface(
+        color = rowBg,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
     ) {
-        Icon(
-            activityIcon(item),
-            null,
-            Modifier.size(16.dp),
-            tint = muted,
-        )
-        Spacer(Modifier.width(9.dp))
-        Text(text, Modifier.weight(1f), fontSize = 13.sp, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (showProgress) {
-            AnimatedThinkingDots(dotColor = muted)
-            Spacer(Modifier.width(6.dp))
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 6.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                when {
+                    isCompleted -> Icons.Default.CheckCircle
+                    isUsageFailure -> Icons.Default.Warning
+                    isError -> Icons.Default.ErrorOutline
+                    else -> activityIcon(item)
+                },
+                null,
+                Modifier.size(16.dp),
+                tint = iconColor,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = text,
+                modifier = Modifier.weight(1f),
+                fontSize = 13.sp,
+                color = textColor,
+                textDecoration = textDecoration,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (showProgress) {
+                AnimatedThinkingDots(dotColor = muted)
+                Spacer(Modifier.width(6.dp))
+            }
+            Icon(
+                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                if (expanded) "Collapse activity" else "Expand activity",
+                Modifier.size(17.dp),
+                tint = muted,
+            )
         }
-        Icon(
-            if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-            if (expanded) "Collapse activity" else "Expand activity",
-            Modifier.size(18.dp),
-            tint = muted,
-        )
     }
 }
 
@@ -8405,7 +8661,12 @@ private fun DiffLineRow(line: DiffLine) {
 }
 
 @Composable
-private fun PreviewTab(ready: Boolean, url: String?) {
+private fun PreviewTab(
+    ready: Boolean,
+    url: String?,
+    detectedServices: List<com.jarves.mh.runtime.DetectedService> = emptyList(),
+    onRefreshServices: () -> Unit = {},
+) {
     var address by rememberSaveable(url) { mutableStateOf(if (ready) url.orEmpty() else "") }
     var activeUrl by rememberSaveable(url) { mutableStateOf(if (ready) url else null) }
     var addressError by remember { mutableStateOf<String?>(null) }
@@ -8438,6 +8699,62 @@ private fun PreviewTab(ready: Boolean, url: String?) {
             tonalElevation = 1.dp,
         ) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                // Auto-detected apps row
+                if (detectedServices.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            modifier = Modifier.clickable(onClick = onRefreshServices),
+                        ) {
+                            Row(Modifier.padding(horizontal = 7.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Refresh, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("Scan", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+
+                        detectedServices.forEach { service ->
+                            val isActive = activeUrl == service.url
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (isActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                border = if (isActive) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                modifier = Modifier.clickable {
+                                    address = service.url
+                                    activeUrl = service.url
+                                    addressError = null
+                                },
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .size(7.dp)
+                                            .background(if (service.isVsCode) PocketOrange else PocketGreen, CircleShape)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = service.name,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = address,

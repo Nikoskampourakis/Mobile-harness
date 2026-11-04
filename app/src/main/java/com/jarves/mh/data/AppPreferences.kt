@@ -226,6 +226,46 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("debug_update_manifest_url", "") ?: ""
         set(value) { preferences.edit().putString("debug_update_manifest_url", value).apply() }
 
+    var autoCleanStorageEnabled: Boolean
+        get() = preferences.getBoolean("auto_clean_storage_enabled", true)
+        set(value) { preferences.edit().putBoolean("auto_clean_storage_enabled", value).apply() }
+
+    var compressLogsEnabled: Boolean
+        get() = preferences.getBoolean("compress_logs_enabled", true)
+        set(value) { preferences.edit().putBoolean("compress_logs_enabled", value).apply() }
+
+    var editorWordWrap: Boolean
+        get() = preferences.getBoolean("editor_word_wrap", false)
+        set(value) { preferences.edit().putBoolean("editor_word_wrap", value).apply() }
+
+    var editorFontSize: Int
+        get() = preferences.getInt("editor_font_size", 13)
+        set(value) { preferences.edit().putInt("editor_font_size", value.coerceIn(10, 24)).apply() }
+
+    var editorShowLineNumbers: Boolean
+        get() = preferences.getBoolean("editor_show_line_numbers", true)
+        set(value) { preferences.edit().putBoolean("editor_show_line_numbers", value).apply() }
+
+    var editorShowMinimap: Boolean
+        get() = preferences.getBoolean("editor_show_minimap", true)
+        set(value) { preferences.edit().putBoolean("editor_show_minimap", value).apply() }
+
+    var editorStickyScroll: Boolean
+        get() = preferences.getBoolean("editor_sticky_scroll", true)
+        set(value) { preferences.edit().putBoolean("editor_sticky_scroll", value).apply() }
+
+    var editorCodeFolding: Boolean
+        get() = preferences.getBoolean("editor_code_folding", true)
+        set(value) { preferences.edit().putBoolean("editor_code_folding", value).apply() }
+
+    var editorIndentGuides: Boolean
+        get() = preferences.getBoolean("editor_indent_guides", true)
+        set(value) { preferences.edit().putBoolean("editor_indent_guides", value).apply() }
+
+    var hideCompletedSteps: Boolean
+        get() = preferences.getBoolean("hide_completed_steps", false)
+        set(value) { preferences.edit().putBoolean("hide_completed_steps", value).apply() }
+
     /** Development stacks the user picked during onboarding (names of DevStack). */
     var selectedDevStacks: Set<String>
         get() {
@@ -241,6 +281,56 @@ class AppPreferences(private val context: Context) {
             preferences.edit().putString("selected_dev_stacks", arr.toString()).apply()
         }
 
+    fun exportAll(): JSONObject {
+        val result = JSONObject()
+        preferences.all.forEach { (key, value) ->
+            if (key in DEVICE_ONLY_KEYS || value == null) return@forEach
+            val (type, encoded) = when (value) {
+                is Boolean -> "bool" to value
+                is Int -> "int" to value
+                is Long -> "long" to value
+                is Float -> "float" to value.toDouble()
+                is String -> "string" to value
+                is Set<*> -> "set" to JSONArray(value.filterIsInstance<String>())
+                else -> return@forEach
+            }
+            result.put(key, JSONObject().put("t", type).put("v", encoded))
+        }
+        return result
+    }
+
+    /** Replaces portable settings with [backup] while keeping this device's install state. */
+    fun importAll(backup: JSONObject) {
+        val kept = preferences.all.filterKeys { it in DEVICE_ONLY_KEYS }
+        val editor = preferences.edit().clear()
+        kept.forEach { (key, value) -> editor.putTyped(key, value) }
+        backup.keys().forEach { key ->
+            if (key in DEVICE_ONLY_KEYS) return@forEach
+            val item = backup.optJSONObject(key) ?: return@forEach
+            when (item.optString("t")) {
+                "bool" -> editor.putBoolean(key, item.optBoolean("v"))
+                "int" -> editor.putInt(key, item.optInt("v"))
+                "long" -> editor.putLong(key, item.optLong("v"))
+                "float" -> editor.putFloat(key, item.optDouble("v").toFloat())
+                "string" -> editor.putString(key, item.optString("v"))
+                "set" -> item.optJSONArray("v")?.let { array ->
+                    editor.putStringSet(key, (0 until array.length()).map(array::optString).toSet())
+                }
+            }
+        }
+        editor.commit()
+    }
+
+    private fun android.content.SharedPreferences.Editor.putTyped(key: String, value: Any?) {
+        when (value) {
+            is Boolean -> putBoolean(key, value)
+            is Int -> putInt(key, value)
+            is Long -> putLong(key, value)
+            is Float -> putFloat(key, value)
+            is String -> putString(key, value)
+            is Set<*> -> putStringSet(key, value.filterIsInstance<String>().toSet())
+        }
+    }
 
     fun saveProvider(profile: ProviderProfile, agent: AgentKind? = null) {
         val editor = preferences.edit()
@@ -588,5 +678,18 @@ class AppPreferences(private val context: Context) {
     private fun String.toChatTitle(): String {
         val clean = replace(Regex("\\s+"), " ").trim()
         return if (clean.length <= 42) clean else clean.take(39).trimEnd() + "…"
+    }
+
+    companion object {
+        val DEVICE_ONLY_KEYS = setOf(
+            "runtime_setup_complete",
+            "background_setup_complete",
+            "last_app_update_check_millis",
+            "debug_update_manifest_url",
+            "test_provider_defaults_version",
+            "dsh_version",
+            "whats_new_seen_code",
+            "backup_feature_seen",
+        )
     }
 }
