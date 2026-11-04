@@ -904,11 +904,23 @@ class RuntimeInstaller(private val context: Context) {
             DevStack.CPP -> {
                 aptInstall(
                     proot,
-                    listOf("build-essential", "cmake", "gdb"),
+                    listOf("build-essential", "cmake"),
                     str(R.string.rt_install_cpp),
                     from,
                     onProgress,
                 )
+                // gdb has heavy dependencies (libicu, python3, etc.) that can stall on mobile network mirrors.
+                // We attempt it as a best-effort install so gcc/g++/make/cmake are guaranteed ready.
+                runCatching {
+                    aptInstallInternal(
+                        proot = proot,
+                        packages = listOf("gdb"),
+                        fraction = from + 0.5f * (to - from),
+                        onProgress = onProgress,
+                    )
+                }.onFailure { error ->
+                    android.util.Log.w("RuntimeInstaller", "Optional gdb installation skipped: ${error.message}")
+                }
                 verifyGuest(
                     proot,
                     "gcc --version && g++ --version && make --version && cmake --version",
@@ -1339,17 +1351,21 @@ class RuntimeInstaller(private val context: Context) {
             ),
         )
         writeResolver()
-        val command = "export DEBIAN_FRONTEND=noninteractive; " +
+        writeAptConfig()
+        val aptOpts = "-o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=5 -o Acquire::http::Pipeline-Depth=0 -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+        val envPrefix = "export DEBIAN_FRONTEND=noninteractive; export DEBCONF_NONINTERACTIVE_SEEN=true; export UCF_FORCE_CONFFOLD=1; export NEEDRESTART_MODE=a; export NEEDRESTART_SUSPEND=1; export DEBIAN_PRIORITY=critical; "
+        val command = "$envPrefix" +
             "dpkg --configure -a && " +
-            "apt-get -o DPkg::Lock::Timeout=120 -f install -y && " +
-            "apt-get -o DPkg::Lock::Timeout=120 update && " +
-            "apt-get -o DPkg::Lock::Timeout=120 upgrade -y"
+            "apt-get $aptOpts -f install -y && " +
+            "(apt-get $aptOpts update || apt-get $aptOpts update || true) && " +
+            "apt-get $aptOpts upgrade -y && " +
+            "apt-get clean"
         runGuestCommand(
             proot = proot,
             command = command,
             displayCommand = "dpkg --configure -a && apt-get -f install -y && apt-get update && apt-get upgrade -y",
             fraction = 0.69f,
-            timeoutMs = 35 * 60 * 1_000L,
+            timeoutMs = 25 * 60 * 1_000L,
             onProgress = onProgress,
             failureMessage = str(R.string.rt_install_ubuntu_maintenance_failed),
         )
@@ -1363,22 +1379,52 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         require(packages.isNotEmpty()) { "No packages selected" }
         writeResolver()
+        writeAptConfig()
         val packageNames = packages.joinToString(" ")
-        val command = "export DEBIAN_FRONTEND=noninteractive; " +
+        val aptOpts = "-o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=5 -o Acquire::http::Pipeline-Depth=0 -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+        val envPrefix = "export DEBIAN_FRONTEND=noninteractive; export DEBCONF_NONINTERACTIVE_SEEN=true; export UCF_FORCE_CONFFOLD=1; export NEEDRESTART_MODE=a; export NEEDRESTART_SUSPEND=1; export DEBIAN_PRIORITY=critical; "
+        val command = "$envPrefix" +
             "dpkg --configure -a && " +
-            "apt-get -o DPkg::Lock::Timeout=120 -f install -y && " +
-            "apt-get -o DPkg::Lock::Timeout=120 update && " +
-            "apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends $packageNames && " +
-            "apt-get clean && rm -rf /var/lib/apt/lists/*"
-        runGuestCommand(
-            proot = proot,
-            command = command,
-            displayCommand = "dpkg --configure -a && apt-get -f install -y && apt-get install -y $packageNames",
-            fraction = fraction,
-            timeoutMs = 30 * 60 * 1_000L,
-            onProgress = onProgress,
-            failureMessage = str(R.string.rt_install_could_not_install, packageNames),
-        )
+            "apt-get $aptOpts -f install -y && " +
+            "(apt-get $aptOpts update || apt-get $aptOpts update || true) && " +
+            "apt-get $aptOpts install -y --no-install-recommends $packageNames && " +
+            "apt-get clean"
+
+        var lastError: Throwable? = null
+        for (attempt in 1..2) {
+            try {
+                runGuestCommand(
+                    proot = proot,
+                    command = command,
+                    displayCommand = "dpkg --configure -a && apt-get -f install -y && apt-get install -y $packageNames",
+                    fraction = fraction,
+                    timeoutMs = 15 * 60 * 1_000L,
+                    onProgress = onProgress,
+                    failureMessage = str(R.string.rt_install_could_not_install, packageNames),
+                )
+                lastError = null
+                break
+            } catch (t: Throwable) {
+                lastError = t
+                if (attempt < 2) {
+                    android.util.Log.w("RuntimeInstaller", "apt install attempt $attempt failed for $packageNames, recovering...", t)
+                    writeResolver()
+                    writeAptConfig()
+                    runCatching {
+                        runGuestCommand(
+                            proot = proot,
+                            command = "$envPrefix dpkg --configure -a && apt-get $aptOpts -f install -y && apt-get clean",
+                            displayCommand = "dpkg --configure -a && apt-get -f install -y",
+                            fraction = fraction,
+                            timeoutMs = 3 * 60 * 1_000L,
+                            onProgress = onProgress,
+                            failureMessage = "dpkg recovery",
+                        )
+                    }
+                }
+            }
+        }
+        if (lastError != null) throw lastError
     }
 
     private suspend fun aptRemove(
@@ -1388,16 +1434,20 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         require(packages.isNotEmpty()) { "No packages selected" }
+        writeResolver()
+        writeAptConfig()
         val packageNames = packages.joinToString(" ")
-        val command = "export DEBIAN_FRONTEND=noninteractive; " +
-            "apt-get -o DPkg::Lock::Timeout=120 purge -y $packageNames && " +
-            "apt-get clean && rm -rf /var/lib/apt/lists/*"
+        val aptOpts = "-o Acquire::ForceIPv4=true -o DPkg::Lock::Timeout=120 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+        val envPrefix = "export DEBIAN_FRONTEND=noninteractive; export DEBCONF_NONINTERACTIVE_SEEN=true; export UCF_FORCE_CONFFOLD=1; export NEEDRESTART_MODE=a; export NEEDRESTART_SUSPEND=1; export DEBIAN_PRIORITY=critical; "
+        val command = "$envPrefix" +
+            "apt-get $aptOpts purge -y $packageNames && " +
+            "apt-get clean"
         runGuestCommand(
             proot = proot,
             command = command,
             displayCommand = "apt-get purge -y $packageNames",
             fraction = fraction,
-            timeoutMs = 20 * 60 * 1_000L,
+            timeoutMs = 15 * 60 * 1_000L,
             onProgress = onProgress,
             failureMessage = str(R.string.rt_install_could_not_remove, packageNames),
         )
@@ -1428,6 +1478,8 @@ class RuntimeInstaller(private val context: Context) {
             environment = emptyMap(),
             guestCommand = listOf("/usr/bin/env", "bash", "-lc", command),
         )
+        // Immediately close stdin pipe so non-interactive guest processes never block waiting for input
+        runCatching { running.outputStream.close() }
         val native = running as? NativeSpawnProcess
         val collected = StringBuilder()
         try {
@@ -1677,6 +1729,7 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     fun ensureSettingsAndHooks() {
+        writeAptConfig()
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")
         hook.parentFile?.mkdirs()
         hook.writeText(
@@ -1725,6 +1778,35 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         ensureWorkspaceTrust("/workspace")
     }
 
+    fun writeAptConfig() {
+        val confDir = File(rootfs, "etc/apt/apt.conf.d").apply { mkdirs() }
+        val confFile = File(confDir, "99pocketdev.conf")
+        val config = """
+            // Mobile Harness robust APT network and execution settings
+            Acquire::ForceIPv4 "true";
+            Acquire::http::Timeout "30";
+            Acquire::https::Timeout "30";
+            Acquire::ftp::Timeout "30";
+            Acquire::Retries "5";
+            Acquire::http::Pipeline-Depth "0";
+            Acquire::BrokenProxy "true";
+            Acquire::http::No-Cache "true";
+            Acquire::http::SendAccept "true";
+            DPkg::Lock::Timeout "120";
+            DPkg::Options {
+               "--force-confdef";
+               "--force-confold";
+            };
+            APT::Install-Recommends "false";
+            APT::Install-Suggests "false";
+            APT::Periodic::Update-Package-Lists "0";
+            APT::Periodic::Download-Upgradeable-Packages "0";
+            APT::Periodic::AutocleanInterval "0";
+            APT::Periodic::Unattended-Upgrade "0";
+        """.trimIndent()
+        runCatching { confFile.writeText(config + "\n") }
+    }
+
     private fun ensureWorkspaceTrust(workspacePath: String) {
         val stateFile = File(rootfs, "root/.claude.json")
         val state = runCatching { JSONObject(stateFile.readText()) }.getOrElse { JSONObject() }
@@ -1752,9 +1834,17 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
 
     private fun writeResolver() {
         val manager = context.getSystemService(ConnectivityManager::class.java)
-        val dns = manager.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
-        val servers = dns.mapNotNull { it.hostAddress }.ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
-        File(rootfs, "etc/resolv.conf").writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
+        val dns = runCatching {
+            manager?.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
+        }.getOrDefault(emptyList())
+        val hostAddresses = dns.mapNotNull { it.hostAddress }
+        // Prioritize IPv4 nameservers to avoid PRoot IPv6 socket hang on Android
+        val ipv4Servers = hostAddresses.filter { it.contains('.') && !it.contains(':') }
+        val allServers = (ipv4Servers + listOf("1.1.1.1", "8.8.8.8", "8.8.4.4")).distinct()
+        val lines = listOf("options timeout:2 attempts:2 rotate") + allServers.take(3).map { "nameserver $it" }
+        val resolvFile = File(rootfs, "etc/resolv.conf")
+        resolvFile.parentFile?.mkdirs()
+        runCatching { resolvFile.writeText(lines.joinToString("\n") + "\n") }
     }
 
     private fun extractRootfs(archive: File, destination: File) {
