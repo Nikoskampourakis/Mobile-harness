@@ -78,8 +78,8 @@ android {
         applicationId = "com.jarves.mh"
         minSdk = 28
         targetSdk = if (playBuild) 36 else 28
-        versionCode = 8
-        versionName = "1.0.7"
+        versionCode = 12
+        versionName = "1.1.0"
         providers.gradleProperty("appVersionCode").orNull?.toIntOrNull()?.let { versionCode = it }
         providers.gradleProperty("appVersionName").orNull?.let { versionName = it }
 
