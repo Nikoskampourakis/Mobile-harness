@@ -44,6 +44,8 @@ data class TerminalSkinConfig(
     val contentPaddingDp: Int = 12,
     val showAsciiBanner: Boolean = true,
     val customBannerText: String? = null,
+    val bannerColor: Long? = null,
+    val bannerGradient: List<Long>? = null,
     val autocorrectEnabled: Boolean = true,
 )
 

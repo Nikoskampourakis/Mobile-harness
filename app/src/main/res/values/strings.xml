@@ -391,4 +391,22 @@
     <string name="diagnostics_inactive_stopped">Inactive processes stopped</string>
     <string name="diagnostics_cache_busy">Wait for active work to finish before clearing output</string>
     <string name="diagnostics_cache_cleared">Disposable runtime output cleared</string>
+
+    <!-- New Feature Strings (Voice, Steer, Queue) -->
+    <string name="voice_mode_settings">Voice settings</string>
+    <string name="voice_mode_mute">Mute</string>
+    <string name="voice_mode_unmute">Unmute</string>
+    <string name="voice_mode_captions">Captions</string>
+    <string name="voice_mode_camera_front">Front camera</string>
+    <string name="voice_mode_camera_rear">Rear camera</string>
+    <string name="voice_mode_camera_off">Disable camera</string>
+    <string name="voice_mode_interrupt">Interrupt response</string>
+    <string name="steer_mode_toggle">Toggle Steer Mode</string>
+    <string name="steer_mode_active">Steer Mode active: Instruction will guide agent live</string>
+    <string name="message_queue_title">Message queue (%1$d)</string>
+    <string name="message_queue_paused">Paused</string>
+    <string name="message_queue_resume">Resume queue</string>
+    <string name="message_queue_pause">Pause queue</string>
+    <string name="gallery_pick">Pick from Gallery</string>
+    <string name="terminal_specs_title">Device specifications</string>
 </resources>

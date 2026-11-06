@@ -29,6 +29,7 @@ import com.jarves.mh.BuildConfig
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -5287,6 +5288,10 @@ private fun WorkspaceScreen(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
         onResult = onAddAttachments,
     )
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(),
+        onResult = onAddAttachments,
+    )
     val takePictureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture(),
         onResult = { success ->
@@ -6024,7 +6029,10 @@ private fun WorkspaceScreen(
                         agentKind = state.agentKind,
                         pendingAttachments = state.pendingAttachments,
                         onAttach = {
-                            attachmentLauncher.launch(arrayOf("image/*", "text/*", "application/json", "application/xml"))
+                            attachmentLauncher.launch(arrayOf("*/*"))
+                        },
+                        onGallery = {
+                            galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                         },
                         onCamera = {
                             runCatching {
@@ -6664,6 +6672,7 @@ private fun ChatTab(
     speakingUtteranceId: String? = null,
     onToggleSpeakMessage: ((ChatMessage) -> Unit)? = null,
     onCamera: (() -> Unit)? = null,
+    onGallery: (() -> Unit)? = null,
     onRetryMessage: (String) -> Unit = {},
     onForkChat: (String?) -> Unit = {},
     onEditMessage: (String, String) -> Unit = { _, _ -> },
@@ -7089,15 +7098,23 @@ private fun ChatTab(
                         )
 
                         // Main message input row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.Bottom,
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                            tonalElevation = 2.dp,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.Bottom,
+                            ) {
                             var showUploadMenu by remember { mutableStateOf(false) }
                             Box {
                                 IconButton(
                                     onClick = { showUploadMenu = true },
-                                    enabled = !isRunning && pendingAttachments.size < 5,
+                                    enabled = pendingAttachments.size < 100,
                                     modifier = Modifier.size(42.dp),
                                 ) {
                                     Icon(
@@ -7118,6 +7135,14 @@ private fun ChatTab(
                                             onAttach()
                                         },
                                         leadingIcon = { Icon(Icons.Default.AttachFile, null) }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Pick from Gallery") },
+                                        onClick = {
+                                            showUploadMenu = false
+                                            onGallery?.invoke()
+                                        },
+                                        leadingIcon = { Icon(Icons.Default.PhotoLibrary, null) }
                                     )
                                     if (onCamera != null) {
                                         DropdownMenuItem(
@@ -7163,6 +7188,21 @@ private fun ChatTab(
                             Spacer(Modifier.width(2.dp))
 
                             var showLiveVoiceDialog by rememberSaveable { mutableStateOf(false) }
+
+                            if (isRunning) {
+                                IconButton(
+                                    onClick = onToggleSteerMode,
+                                    modifier = Modifier.size(42.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Navigation,
+                                        contentDescription = "Toggle Steer Mode",
+                                        tint = if (isSteerMode) Color(0xFF38BDF8) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                }
+                                Spacer(Modifier.width(2.dp))
+                            }
 
                             IconButton(
                                 onClick = { showLiveVoiceDialog = true },
@@ -7211,22 +7251,51 @@ private fun ChatTab(
                             }
 
                             if (isRunning) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(42.dp)
-                                        .background(
-                                            color = MaterialTheme.colorScheme.error,
-                                            shape = CircleShape,
+                                if (prompt.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.error,
+                                                shape = CircleShape,
+                                            )
+                                            .clickable(onClick = onStop),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Stop,
+                                            contentDescription = "Stop AI task",
+                                            tint = MaterialTheme.colorScheme.onError,
+                                            modifier = Modifier.size(20.dp),
                                         )
-                                        .clickable(onClick = onStop),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Stop,
-                                        contentDescription = "Stop AI task",
-                                        tint = MaterialTheme.colorScheme.onError,
-                                        modifier = Modifier.size(20.dp),
-                                    )
+                                    }
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .background(
+                                                color = if (isSteerMode) Color(0xFF38BDF8) else PocketGreen,
+                                                shape = CircleShape,
+                                            )
+                                            .clickable(
+                                                onClick = {
+                                                    if (isSteerMode) {
+                                                        onSteerMessage(prompt)
+                                                    } else {
+                                                        onSend(prompt)
+                                                    }
+                                                    prompt = ""
+                                                },
+                                            ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isSteerMode) Icons.Default.Navigation else Icons.Default.Queue,
+                                            contentDescription = if (isSteerMode) "Steer" else "Queue",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                    }
                                 }
                             } else {
                                 Box(
@@ -7256,6 +7325,7 @@ private fun ChatTab(
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

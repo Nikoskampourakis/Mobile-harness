@@ -853,6 +853,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun requestProjectTerminalCommand(command: String) {
         val normalized = command.trim()
         if (normalized.isBlank() || _state.value.projectTerminalRunning || _state.value.androidBuildRunning || projectTerminalProcess?.isAlive == true) return
+        
+        if (normalized == "specs" || normalized == "neofetch") {
+            runSpecsCommand()
+            return
+        }
+
         if (requiresAndroidToolchain(normalized) && !installer.isStackInstalled(DevStack.ANDROID)) {
             _state.update {
                 it.copy(toastMessage = str(R.string.vm_android_tools_missing))
@@ -950,6 +956,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             projectTerminalProjectId = null
             projectTerminalStopRequested = false
         }
+    }
+
+    private fun runSpecsCommand() {
+        val project = _state.value.activeProject ?: return
+        val runtime = Runtime.getRuntime()
+        val totalMemory = runtime.totalMemory() / (1024 * 1024)
+        val freeMemory = runtime.freeMemory() / (1024 * 1024)
+        val android = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+        val specs = """
+            OS: $android
+            CPU: ${Build.HARDWARE}
+            RAM: ${totalMemory}MB Total (${freeMemory}MB Free)
+            PROJECT: ${project.name}
+            RUNTIME: Ubuntu PRoot (arm64)
+            POCKETBRIDGE: v1.4.2-stable
+            BOOT: ${project.bootCommands.size} commands defined
+        """.trimIndent()
+        
+        val line = TerminalOutputLine(
+            command = "specs",
+            output = specs,
+            exitCode = 0
+        )
+        _state.update { it.copy(projectTerminalLines = (it.projectTerminalLines + line).takeLast(MAX_PROJECT_TERMINAL_HISTORY)) }
     }
 
     fun stopProjectTerminalCommand() {
@@ -3537,6 +3567,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val pending = activeRuntime().loadPendingChanges(project.id)
             if (_state.value.activeProject?.id == project.id) _state.update { it.copy(changes = pending) }
+        }
+        
+        if (project.bootCommands.isNotEmpty()) {
+            viewModelScope.launch {
+                delay(1000) // Give UI time to stabilize
+                project.bootCommands.forEach { cmd ->
+                    requestProjectTerminalCommand(cmd)
+                    while (_state.value.projectTerminalRunning) delay(500)
+                }
+            }
         }
     }
 

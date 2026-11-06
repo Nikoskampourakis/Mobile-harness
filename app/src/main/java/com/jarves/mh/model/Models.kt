@@ -268,6 +268,7 @@ data class Project(
     val icon: String? = null,
     val permissionMode: PermissionMode = PermissionMode.WAIT_FOR_APPROVAL,
     val externalFolderPath: String? = null,
+    val bootCommands: List<String> = emptyList(),
 ) {
     val formattedUpdatedAt: String
         get() {

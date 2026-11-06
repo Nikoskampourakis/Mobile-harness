@@ -26,6 +26,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -112,6 +115,47 @@ private const val ASCII_BANNER = """
 [Mobile Harness Multi-Session Developer Terminal Workstation]
 """
 
+@Composable
+private fun rememberAsciiBanner(skinConfig: TerminalSkinConfig): AnnotatedString {
+    return remember(skinConfig.customBannerText, skinConfig.bannerColor, skinConfig.bannerGradient) {
+        val baseText = skinConfig.customBannerText ?: ASCII_BANNER
+        buildAnnotatedString {
+            if (skinConfig.bannerGradient != null && skinConfig.bannerGradient.size >= 2) {
+                // Approximate gradient by line or character - here we do line-based simple gradient
+                val lines = baseText.trim('\n').split('\n')
+                lines.forEachIndexed { i, line ->
+                    val ratio = i.toFloat() / (lines.size - 1).coerceAtLeast(1)
+                    val color = interpolateColor(skinConfig.bannerGradient, ratio)
+                    withStyle(SpanStyle(color = color)) {
+                        append(line)
+                        if (i < lines.size - 1) append("\n")
+                    }
+                }
+            } else {
+                withStyle(SpanStyle(color = skinConfig.bannerColor?.let { Color(it) } ?: PocketGreen)) {
+                    append(baseText)
+                }
+            }
+        }
+    }
+}
+
+private fun interpolateColor(colors: List<Long>, ratio: Float): Color {
+    if (colors.isEmpty()) return PocketGreen
+    if (colors.size == 1) return Color(colors[0])
+    val segmentCount = colors.size - 1
+    val segment = (ratio * segmentCount).toInt().coerceIn(0, segmentCount - 1)
+    val segmentRatio = (ratio * segmentCount) - segment
+    val c1 = Color(colors[segment])
+    val c2 = Color(colors[segment + 1])
+    return Color(
+        red = c1.red + (c2.red - c1.red) * segmentRatio,
+        green = c1.green + (c2.green - c1.green) * segmentRatio,
+        blue = c1.blue + (c2.blue - c1.blue) * segmentRatio,
+        alpha = c1.alpha + (c2.alpha - c1.alpha) * segmentRatio
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TerminalScreen(
@@ -165,6 +209,7 @@ fun TerminalScreen(
     var altActive by rememberSaveable { mutableStateOf(false) }
     var ctrlActive by rememberSaveable { mutableStateOf(false) }
     val terminalScrollState = rememberScrollState()
+    val terminalListState = rememberLazyListState()
     val inputFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -192,6 +237,12 @@ fun TerminalScreen(
                 historyIndex = -1
             }
             commandInput = TextFieldValue()
+        }
+    }
+
+    LaunchedEffect(lines.size, liveOutput) {
+        if (lines.isNotEmpty() || liveOutput.isNotEmpty()) {
+            terminalListState.animateScrollToItem((lines.size + 3).coerceAtLeast(0))
         }
     }
 
@@ -409,35 +460,42 @@ fun TerminalScreen(
                     color = terminalBg,
                     shape = RoundedCornerShape(12.dp),
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(terminalScrollState)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        SelectionContainer {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (lines.isEmpty()) {
-                                    if (skinConfig.showAsciiBanner) {
+                    val asciiBanner = rememberAsciiBanner(skinConfig)
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        SelectionContainer(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            LazyColumn(
+                                state = terminalListState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                // 1. ASCII Banner
+                                if (skinConfig.showAsciiBanner) {
+                                    item(key = "terminal-ascii-banner") {
                                         Text(
-                                            text = skinConfig.customBannerText ?: ASCII_BANNER,
+                                            text = asciiBanner,
                                             fontFamily = FontFamily.Monospace,
-                                            fontSize = 9.sp,
-                                            lineHeight = 11.sp,
-                                            color = promptColor.copy(alpha = 0.85f),
-                                            fontWeight = FontWeight.Bold,
+                                            fontSize = (skinConfig.fontSizeSp * 0.85f).sp,
+                                            lineHeight = (skinConfig.lineHeightSp * 0.85f).sp,
+                                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                                         )
                                     }
-                                    Text(
-                                        stringResource(R.string.workspace_terminal_ready),
-                                        fontFamily = selectedFontFamily,
-                                        fontSize = skinConfig.fontSizeSp.sp,
-                                        color = outputTextColor.copy(alpha = 0.6f),
-                                    )
                                 }
 
-                                for (item in lines) {
+                                // 2. Welcome Message (if empty)
+                                if (lines.isEmpty() && !isRunning) {
+                                    item(key = "terminal-ready-msg") {
+                                        Text(
+                                            stringResource(R.string.workspace_terminal_ready),
+                                            fontFamily = selectedFontFamily,
+                                            fontSize = skinConfig.fontSizeSp.sp,
+                                            color = outputTextColor.copy(alpha = 0.6f),
+                                        )
+                                    }
+                                }
+
+                                // 3. History Lines
+                                items(lines, key = { it.id }) { item ->
                                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         TerminalCommandPrompt(promptPath = terminalPromptPath, command = item.command, isDark = isDark)
                                         if (item.output.isNotEmpty()) {
@@ -453,104 +511,116 @@ fun TerminalScreen(
                                     }
                                 }
 
+                                // 4. Active Command
                                 if (isRunning && currentCommand != null) {
-                                    TerminalCommandPrompt(promptPath = terminalPromptPath, command = currentCommand, isDark = isDark)
+                                    item(key = "current-running-command") {
+                                        TerminalCommandPrompt(promptPath = terminalPromptPath, command = currentCommand, isDark = isDark)
+                                    }
                                 }
 
-                                if (liveOutput.isNotBlank()) {
-                                    Text(
-                                        sanitizeTerminalOutput(liveOutput),
-                                        fontFamily = selectedFontFamily,
-                                        fontSize = skinConfig.fontSizeSp.sp,
-                                        lineHeight = skinConfig.lineHeightSp.sp,
-                                        color = outputTextColor,
-                                    )
+                                // 5. Live Output
+                                if (isRunning && liveOutput.isNotBlank()) {
+                                    item(key = "terminal-live-output") {
+                                        Text(
+                                            sanitizeTerminalOutput(liveOutput),
+                                            fontFamily = selectedFontFamily,
+                                            fontSize = skinConfig.fontSizeSp.sp,
+                                            lineHeight = skinConfig.lineHeightSp.sp,
+                                            color = outputTextColor,
+                                        )
+                                    }
                                 }
                             }
                         }
 
-                        // Terminal inline prompt input
-                        val prefix = if (isRunning) "" else "root@pocket:$terminalPromptPath# "
-                        val prefixVisualTransformation = remember(prefix, isDark) {
-                            VisualTransformation { text ->
-                                val transformed = buildAnnotatedString {
-                                    withStyle(SpanStyle(color = promptColor, fontWeight = FontWeight.Bold)) {
-                                        append(prefix)
-                                    }
-                                    withStyle(SpanStyle(color = commandTextColor, fontWeight = FontWeight.SemiBold)) {
-                                        append(text.text)
-                                    }
-                                }
-                                val offsetMapping = object : OffsetMapping {
-                                    override fun originalToTransformed(offset: Int): Int =
-                                        (offset + prefix.length).coerceIn(0, prefix.length + text.length)
-
-                                    override fun transformedToOriginal(offset: Int): Int =
-                                        (offset - prefix.length).coerceIn(0, text.length)
-                                }
-                                TransformedText(transformed, offsetMapping)
-                            }
-                        }
-
-                        BasicTextField(
-                            value = commandInput,
-                            onValueChange = { next ->
-                                if (ctrlActive && next.text.length > commandInput.text.length) {
-                                    val inserted = next.text.substring(
-                                        commandInput.selection.start.coerceAtMost(next.text.length),
-                                        next.selection.end.coerceAtMost(next.text.length),
-                                    )
-                                    when {
-                                        inserted.any { it.equals('c', ignoreCase = true) } -> {
-                                            if (isRunning) onInterrupt?.invoke() else commandInput = TextFieldValue()
-                                            ctrlActive = false
-                                        }
-                                        inserted.any { it.equals('d', ignoreCase = true) } -> {
-                                            if (isRunning) onInput("\u0004") else onRun("exit")
-                                            ctrlActive = false
-                                        }
-                                        inserted.any { it.equals('l', ignoreCase = true) } -> {
-                                            onClear()
-                                            ctrlActive = false
-                                        }
-                                        inserted.any { it.equals('z', ignoreCase = true) } -> {
-                                            onStop?.invoke()
-                                            ctrlActive = false
-                                        }
-                                        inserted.any { it.equals('u', ignoreCase = true) } -> {
-                                            commandInput = TextFieldValue()
-                                            ctrlActive = false
-                                        }
-                                        else -> {
-                                            commandInput = next
-                                            ctrlActive = false
-                                        }
-                                    }
-                                } else {
-                                    commandInput = next
-                                }
-                            },
+                        // 6. Inline Prompt Input
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .focusRequester(inputFocusRequester),
-                            singleLine = false,
-                            visualTransformation = prefixVisualTransformation,
-                            cursorBrush = SolidColor(promptColor),
-                            textStyle = androidx.compose.ui.text.TextStyle(
-                                fontFamily = selectedFontFamily,
-                                fontSize = skinConfig.fontSizeSp.sp,
-                                lineHeight = skinConfig.lineHeightSp.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = commandTextColor,
-                            ),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(
-                                onSend = { submitCommand() },
-                                onDone = { submitCommand() },
-                                onGo = { submitCommand() },
-                            ),
-                        )
-                        Spacer(Modifier.height(12.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            val prefix = if (isRunning) "" else "root@pocket:$terminalPromptPath# "
+                            val prefixVisualTransformation = remember(prefix, isDark) {
+                                VisualTransformation { text ->
+                                    val transformed = buildAnnotatedString {
+                                        withStyle(SpanStyle(color = promptColor, fontWeight = FontWeight.Bold)) {
+                                            append(prefix)
+                                        }
+                                        withStyle(SpanStyle(color = commandTextColor, fontWeight = FontWeight.SemiBold)) {
+                                            append(text.text)
+                                        }
+                                    }
+                                    val offsetMapping = object : OffsetMapping {
+                                        override fun originalToTransformed(offset: Int): Int =
+                                            (offset + prefix.length).coerceIn(0, prefix.length + text.length)
+
+                                        override fun transformedToOriginal(offset: Int): Int =
+                                            (offset - prefix.length).coerceIn(0, text.length)
+                                    }
+                                    TransformedText(transformed, offsetMapping)
+                                }
+                            }
+
+                            BasicTextField(
+                                value = commandInput,
+                                onValueChange = { next ->
+                                    if (ctrlActive && next.text.length > commandInput.text.length) {
+                                        val inserted = next.text.substring(
+                                            commandInput.selection.start.coerceAtMost(next.text.length),
+                                            next.selection.end.coerceAtMost(next.text.length),
+                                        )
+                                        when {
+                                            inserted.any { it.equals('c', ignoreCase = true) } -> {
+                                                if (isRunning) onInterrupt?.invoke() else commandInput = TextFieldValue()
+                                                ctrlActive = false
+                                            }
+                                            inserted.any { it.equals('d', ignoreCase = true) } -> {
+                                                if (isRunning) onInput("\u0004") else onRun("exit")
+                                                ctrlActive = false
+                                            }
+                                            inserted.any { it.equals('l', ignoreCase = true) } -> {
+                                                onClear()
+                                                ctrlActive = false
+                                            }
+                                            inserted.any { it.equals('z', ignoreCase = true) } -> {
+                                                onStop?.invoke()
+                                                ctrlActive = false
+                                            }
+                                            inserted.any { it.equals('u', ignoreCase = true) } -> {
+                                                commandInput = TextFieldValue()
+                                                ctrlActive = false
+                                            }
+                                            else -> {
+                                                commandInput = next
+                                                ctrlActive = false
+                                            }
+                                        }
+                                    } else {
+                                        commandInput = next
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(inputFocusRequester),
+                                singleLine = false,
+                                visualTransformation = prefixVisualTransformation,
+                                cursorBrush = SolidColor(promptColor),
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontFamily = selectedFontFamily,
+                                    fontSize = skinConfig.fontSizeSp.sp,
+                                    lineHeight = skinConfig.lineHeightSp.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = commandTextColor,
+                                ),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(
+                                    onSend = { submitCommand() },
+                                    onDone = { submitCommand() },
+                                    onGo = { submitCommand() },
+                                ),
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
                     }
                 }
             }

@@ -479,4 +479,22 @@
     <string name="diagnostics_inactive_stopped">Οι ανενεργές διεργασίες διακόπηκαν</string>
     <string name="diagnostics_cache_busy">Περιμένετε να ολοκληρωθούν οι ενεργές εργασίες πριν από την εκκαθάριση της εξόδου</string>
     <string name="diagnostics_cache_cleared">Η προσωρινή έξοδος περιβάλλοντος εκκαθαρίστηκε</string>
+
+    <!-- New Feature Strings (Voice, Steer, Queue) -->
+    <string name="voice_mode_settings">Ρυθμίσεις φωνής</string>
+    <string name="voice_mode_mute">Σίγαση</string>
+    <string name="voice_mode_unmute">Κατάργηση σίγασης</string>
+    <string name="voice_mode_captions">Υπότιτλοι</string>
+    <string name="voice_mode_camera_front">Εμπρόσθια κάμερα</string>
+    <string name="voice_mode_camera_rear">Πίσω κάμερα</string>
+    <string name="voice_mode_camera_off">Απενεργοποίηση κάμερας</string>
+    <string name="voice_mode_interrupt">Διακοπή απόκρισης</string>
+    <string name="steer_mode_toggle">Εναλλαγή Steer Mode</string>
+    <string name="steer_mode_active">Steer Mode ενεργό: Η οδηγία θα καθοδηγήσει τον agent ζωντανά</string>
+    <string name="message_queue_title">Ουρά μηνυμάτων (%1$d)</string>
+    <string name="message_queue_paused">Σε παύση</string>
+    <string name="message_queue_resume">Συνέχιση ουράς</string>
+    <string name="message_queue_pause">Παύση ουράς</string>
+    <string name="gallery_pick">Επιλογή από Συλλογή</string>
+    <string name="terminal_specs_title">Προδιαγραφές συσκευής</string>
 </resources>

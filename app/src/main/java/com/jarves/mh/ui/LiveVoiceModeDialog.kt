@@ -113,6 +113,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.LifecycleOwner
+import androidx.compose.runtime.DisposableEffect
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.runtime.TtsManager
 import com.jarves.mh.ui.theme.PocketGreen
@@ -367,35 +374,40 @@ fun LiveVoiceModeDialog(
                         verticalArrangement = Arrangement.Center,
                         modifier = Modifier.weight(1f),
                     ) {
-                        // Camera viewfinder preview placeholder when camera is active
+                        // Camera viewfinder preview when camera is active
                         if (cameraState != CameraState.DISABLED) {
                             Box(
                                 modifier = Modifier
-                                    .size(width = 220.dp, height = 150.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(Color(0xFF1E293B))
-                                    .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
+                                    .size(width = 240.dp, height = 160.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color.Black)
+                                    .border(2.dp, Color(0xFF38BDF8).copy(alpha = 0.6f), RoundedCornerShape(20.dp)),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        if (cameraState == CameraState.FRONT) Icons.Default.Cameraswitch else Icons.Default.CameraAlt,
-                                        null,
-                                        tint = Color(0xFF38BDF8),
-                                        modifier = Modifier.size(32.dp),
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        if (cameraState == CameraState.FRONT) "Front Camera Active" else "Rear Camera Active",
-                                        fontSize = 12.sp,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Medium,
-                                    )
-                                    Text(
-                                        "Vision enabled for multimodal agent",
-                                        fontSize = 10.sp,
-                                        color = Color(0xFF94A3B8),
-                                    )
+                                CameraPreview(
+                                    modifier = Modifier.fillMaxSize(),
+                                    cameraState = cameraState,
+                                )
+                                
+                                // Overlay info
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.BottomStart
+                                ) {
+                                    Surface(
+                                        color = Color.Black.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            if (cameraState == CameraState.FRONT) "FRONT" else "REAR",
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
                                 }
                             }
                             Spacer(Modifier.height(24.dp))
@@ -729,4 +741,47 @@ fun LiveVoiceModeDialog(
             }
         }
     }
+}
+
+@Composable
+private fun CameraPreview(
+    modifier: Modifier = Modifier,
+    cameraState: CameraState,
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalContext.current as LifecycleOwner
+    val previewView = remember { PreviewView(context) }
+    val cameraSelector = remember(cameraState) {
+        if (cameraState == CameraState.FRONT) {
+            CameraSelector.DEFAULT_FRONT_CAMERA
+        } else {
+            CameraSelector.DEFAULT_BACK_CAMERA
+        }
+    }
+
+    LaunchedEffect(cameraSelector) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+            val preview = Preview.Builder().build().also {
+                it.surfaceProvider = previewView.surfaceProvider
+            }
+
+            try {
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    preview
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+    AndroidView(
+        factory = { previewView },
+        modifier = modifier
+    )
 }
