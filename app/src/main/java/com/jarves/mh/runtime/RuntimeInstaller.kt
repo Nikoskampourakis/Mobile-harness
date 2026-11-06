@@ -794,6 +794,16 @@ class RuntimeInstaller(private val context: Context) {
                 0.45f,
                 onProgress,
             )
+            DevStack.RUST -> {
+                aptRemove(
+                    runtime.proot,
+                    listOf("rustc", "cargo"),
+                    0.45f,
+                    onProgress,
+                )
+                removePath(File(rootfs, "root/.cargo"))
+                removePath(File(rootfs, "root/.rustup"))
+            }
             DevStack.PHP -> {
                 aptRemove(
                     runtime.proot,
@@ -937,6 +947,20 @@ class RuntimeInstaller(private val context: Context) {
                 )
                 installComposer(proot, from, onProgress)
                 verifyGuest(proot, "php --version && composer --version", str(R.string.rt_install_verify_failed, "PHP"))
+            }
+            DevStack.RUST -> {
+                aptInstall(
+                    proot,
+                    listOf("rustc", "cargo", "build-essential"),
+                    str(R.string.rt_install_rust),
+                    from,
+                    onProgress,
+                )
+                verifyGuest(
+                    proot,
+                    "rustc --version && cargo --version",
+                    str(R.string.rt_install_verify_failed, "Rust"),
+                )
             }
         }
         if (!verified) return
@@ -1252,13 +1276,18 @@ class RuntimeInstaller(private val context: Context) {
 
     fun isStackInstalled(stack: DevStack): Boolean {
         if (readDevStackState()[stack.name] != true) return false
-        if (stack != DevStack.ANDROID) return true
-        return File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
-            File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
-            File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
-            File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
-            File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
-            File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        if (stack == DevStack.ANDROID) {
+            return File(rootfs, "root/.pocket-android-tools-version").readTextOrNull() == ANDROID_TOOLS_VERSION &&
+                File(rootfs, "root/android-sdk/platforms/android-36/android.jar").isFile &&
+                File(rootfs, "root/android-sdk/build-tools/35.0.0/aapt2").isFile &&
+                File(rootfs, "opt/gradle/gradle-8.14.3/bin/gradle").isFile &&
+                File(rootfs, "root/maven/localMvnRepository").let { it.isDirectory && !it.list().isNullOrEmpty() } &&
+                File(rootfs, "root/.gradle/init.d/pocketdev-android.gradle").isFile
+        }
+        if (stack == DevStack.RUST) {
+            return File(rootfs, "usr/bin/rustc").exists() || File(rootfs, "root/.cargo/bin/rustc").exists()
+        }
+        return true
     }
 
     private fun readDevStackState(): MutableMap<String, Boolean> {

@@ -1304,6 +1304,13 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onDismissClarification = viewModel::dismissClarification,
             onResumeInterruptedTask = viewModel::resumeInterruptedTask,
             onDismissInterruptedTask = viewModel::dismissInterruptedTask,
+            onToggleSteerMode = viewModel::toggleSteerMode,
+            onToggleQueuePause = viewModel::toggleQueuePause,
+            onEditQueuedFollowUp = viewModel::editQueuedFollowUp,
+            onSendNextQueuedFollowUp = viewModel::sendNextQueuedFollowUp,
+            onSteerQueuedFollowUp = viewModel::steerQueuedFollowUp,
+            onRemoveQueuedFollowUp = viewModel::removeQueuedFollowUp,
+            onSteerMessage = viewModel::steerActiveAgent,
             onTogglePlanningGoal = viewModel::togglePlanningGoal,
             onTogglePlanningGoalDetails = viewModel::togglePlanningGoalDetails,
             onSelectTerminalSession = viewModel::selectTerminalSession,
@@ -1822,6 +1829,11 @@ private fun getDevStackVisuals(stack: DevStack): DevStackVisuals = when (stack) 
         accentColor = Color(0xFF818CF8),
         tag = "php-cli + Composer",
     )
+    DevStack.RUST -> DevStackVisuals(
+        icon = Icons.Default.Build,
+        accentColor = Color(0xFFF97316),
+        tag = "rustc + cargo",
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2236,6 +2248,10 @@ private fun setupTimeEstimate(selected: Set<DevStack>): String {
         minimumMinutes += 2
         maximumMinutes += 4
     }
+    if (DevStack.RUST in selected) {
+        minimumMinutes += 3
+        maximumMinutes += 5
+    }
     return "$minimumMinutes–$maximumMinutes minutes"
 }
 
@@ -2258,12 +2274,12 @@ private fun toolchainDownloadSummary(selected: Set<DevStack>, agent: AgentKind):
         } +
         (if (DevStack.PYTHON in selected) PYTHON_RUNTIME_DOWNLOAD_MB else 0) +
         (if (DevStack.ANDROID in selected) ANDROID_RUNTIME_DOWNLOAD_MB else 0)
-    val laterPackages = selected.intersect(setOf(DevStack.CPP, DevStack.PHP))
+    val laterPackages = selected.intersect(setOf(DevStack.CPP, DevStack.PHP, DevStack.RUST))
     return buildString {
         append("Download: ")
         append(total)
         append(" MB")
-        if (laterPackages.isNotEmpty()) append(" · C/PHP packages download later")
+        if (laterPackages.isNotEmpty()) append(" · C/PHP/Rust packages download later")
         if (total >= 500) append(" · Wi-Fi recommended")
     }
 }
@@ -2282,6 +2298,7 @@ private fun DevStackChoiceRow(
         DevStack.ANDROID -> "Java and Kotlin build tools"
         DevStack.CPP -> "Native apps and command-line tools"
         DevStack.PHP -> "PHP sites and Laravel projects"
+        DevStack.RUST -> "Rust compiler and Cargo package manager"
     }
 
     Row(
@@ -5158,6 +5175,13 @@ private fun WorkspaceScreen(
     onRefreshDetectedPorts: () -> Unit = {},
     onSaveEditorConfig: (CodeEditorConfig) -> Unit = {},
     editorConfig: CodeEditorConfig = CodeEditorConfig(),
+    onToggleSteerMode: () -> Unit = {},
+    onToggleQueuePause: () -> Unit = {},
+    onEditQueuedFollowUp: (String, String) -> Unit = { _, _ -> },
+    onSendNextQueuedFollowUp: (String) -> Unit = {},
+    onSteerQueuedFollowUp: (String) -> Unit = {},
+    onRemoveQueuedFollowUp: (String) -> Unit = {},
+    onSteerMessage: (String) -> Unit = {},
 ) {
     var showAndroidDashboard by rememberSaveable { mutableStateOf(false) }
     var customizeTarget by remember { mutableStateOf<CustomizeTarget?>(null) }
@@ -6041,6 +6065,17 @@ private fun WorkspaceScreen(
                         interruptedTaskPrompt = state.interruptedTaskPrompt,
                         onResumeInterruptedTask = onResumeInterruptedTask,
                         onDismissInterruptedTask = onDismissInterruptedTask,
+                        queuedFollowUps = state.queuedFollowUps,
+                        activeSteeringInstructions = state.activeSteeringInstructions,
+                        isSteerMode = state.isSteerMode,
+                        isQueuePaused = state.isQueuePaused,
+                        onToggleSteerMode = onToggleSteerMode,
+                        onToggleQueuePause = onToggleQueuePause,
+                        onEditQueuedFollowUp = onEditQueuedFollowUp,
+                        onSendNextQueuedFollowUp = onSendNextQueuedFollowUp,
+                        onSteerQueuedFollowUp = onSteerQueuedFollowUp,
+                        onRemoveQueuedFollowUp = onRemoveQueuedFollowUp,
+                        onSteerMessage = onSteerMessage,
                     )
                     WorkspaceTab.TERMINAL -> {
                         val activeSession = state.terminalSessions.firstOrNull { it.id == state.activeTerminalSessionId } ?: state.terminalSessions.firstOrNull()
@@ -6647,6 +6682,18 @@ private fun ChatTab(
     interruptedTaskPrompt: String? = null,
     onResumeInterruptedTask: () -> Unit = {},
     onDismissInterruptedTask: () -> Unit = {},
+    queuedFollowUps: List<QueuedFollowUp> = emptyList(),
+    activeSteeringInstructions: List<SteerInstruction> = emptyList(),
+    isSteerMode: Boolean = false,
+    isQueuePaused: Boolean = false,
+    onToggleSteerMode: () -> Unit = {},
+    onToggleQueuePause: () -> Unit = {},
+    onEditQueuedFollowUp: (String, String) -> Unit = { _, _ -> },
+    onSendNextQueuedFollowUp: (String) -> Unit = {},
+    onSteerQueuedFollowUp: (String) -> Unit = {},
+    onRemoveQueuedFollowUp: (String) -> Unit = {},
+    onSteerMessage: (String) -> Unit = {},
+    ttsManager: TtsManager? = null,
 ) {
     val view = LocalView.current
     val context = LocalContext.current
@@ -7027,6 +7074,20 @@ private fun ChatTab(
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
                         )
 
+                        MessageQueueAndSteerBanner(
+                            queuedMessages = queuedFollowUps,
+                            activeSteers = activeSteeringInstructions,
+                            isSteerMode = isSteerMode,
+                            isQueuePaused = isQueuePaused,
+                            isRunning = isRunning,
+                            onToggleSteerMode = onToggleSteerMode,
+                            onToggleQueuePause = onToggleQueuePause,
+                            onEditQueued = onEditQueuedFollowUp,
+                            onSendNextQueued = onSendNextQueuedFollowUp,
+                            onSteerQueued = onSteerQueuedFollowUp,
+                            onRemoveQueued = onRemoveQueuedFollowUp,
+                        )
+
                         // Main message input row
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -7100,6 +7161,37 @@ private fun ChatTab(
                             )
 
                             Spacer(Modifier.width(2.dp))
+
+                            var showLiveVoiceDialog by rememberSaveable { mutableStateOf(false) }
+
+                            IconButton(
+                                onClick = { showLiveVoiceDialog = true },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .testTag("live_voice_mode_button"),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.GraphicEq,
+                                    contentDescription = "Live Voice Mode",
+                                    tint = PocketOrange,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(2.dp))
+
+                            if (showLiveVoiceDialog) {
+                                val activeTts = ttsManager ?: TtsManager.getInstance(context)
+                                LiveVoiceModeDialog(
+                                    agentKind = agentKind,
+                                    agentTitle = displayName,
+                                    isRunning = isRunning,
+                                    latestAssistantMessage = messages.lastOrNull { !it.fromUser }?.text,
+                                    onDismiss = { showLiveVoiceDialog = false },
+                                    onSendMessage = onSend,
+                                    onSteerMessage = onSteerMessage,
+                                    ttsManager = activeTts,
+                                )
+                            }
 
                             if (!isRunning) {
                                 IconButton(
@@ -7509,7 +7601,13 @@ private fun activityIcon(item: ActivityItem?): ImageVector {
         ActionKind.INSTALL_PACKAGE -> Icons.Default.Inventory2
         ActionKind.TERMINAL_COMMAND -> Icons.Default.Terminal
         ActionKind.FILE_EDIT -> Icons.Default.EditNote
+        ActionKind.FILE_CREATE -> Icons.Default.NoteAdd
         ActionKind.FILE_READ -> Icons.Default.Description
+        ActionKind.SKILL_USE -> Icons.Default.Extension
+        ActionKind.TOOL_CALL -> Icons.Default.Build
+        ActionKind.ERROR -> Icons.Default.ErrorOutline
+        ActionKind.COMPLETION -> Icons.Default.CheckCircle
+        ActionKind.PERMISSION_REQUEST -> Icons.Default.Security
         ActionKind.ZIP_ARCHIVE -> Icons.Default.FolderZip
         ActionKind.GENERIC -> {
             val task = item.title
@@ -7815,7 +7913,7 @@ private fun ActivityExpandedDetail(item: ActivityItem?, detail: String) {
                 }
             }
         }
-        ActionKind.FILE_READ, ActionKind.GENERIC -> {
+        ActionKind.FILE_CREATE, ActionKind.SKILL_USE, ActionKind.TOOL_CALL, ActionKind.ERROR, ActionKind.COMPLETION, ActionKind.PERMISSION_REQUEST, ActionKind.FILE_READ, ActionKind.GENERIC -> {
             if (item.isCommand) {
                 Text(
                     detail,

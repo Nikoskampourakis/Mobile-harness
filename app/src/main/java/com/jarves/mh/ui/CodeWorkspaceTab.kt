@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
@@ -85,6 +86,7 @@ import com.jarves.mh.ui.theme.PocketOrange
 
 enum class CodeSubTab {
     TREE,
+    ARTIFACTS,
     LIVE_EDITS,
     TERMINAL,
 }
@@ -140,10 +142,16 @@ fun CodeWorkspaceTab(
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     CodeSubTabChip(
-                        label = "Files Tree",
+                        label = "Files",
                         icon = Icons.Default.Folder,
                         selected = selectedSubTab == CodeSubTab.TREE,
                         onClick = { selectedSubTab = CodeSubTab.TREE },
+                    )
+                    CodeSubTabChip(
+                        label = "Artifacts",
+                        icon = Icons.Default.Layers,
+                        selected = selectedSubTab == CodeSubTab.ARTIFACTS,
+                        onClick = { selectedSubTab = CodeSubTab.ARTIFACTS },
                     )
                     CodeSubTabChip(
                         label = if (changes.isNotEmpty()) "Live Edits (${changes.size})" else "AI Edits",
@@ -199,6 +207,13 @@ fun CodeWorkspaceTab(
                     onOpenFile = onOpenFile,
                     onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
                     onExport = onExport,
+                )
+                CodeSubTab.ARTIFACTS -> ProjectArtifactsView(
+                    project = activeProject,
+                    files = files,
+                    changes = changes,
+                    onOpenFile = onOpenFile,
+                    onRefresh = onRefresh,
                 )
                 CodeSubTab.LIVE_EDITS -> LiveAiEditsView(
                     changes = changes,

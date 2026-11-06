@@ -680,6 +680,37 @@ class AppPreferences(private val context: Context) {
         return if (clean.length <= 42) clean else clean.take(39).trimEnd() + "…"
     }
 
+    fun saveQueuedMessages(messages: List<com.jarves.mh.model.QueuedFollowUp>) {
+        val array = JSONArray()
+        for (item in messages) {
+            val obj = JSONObject().apply {
+                put("id", item.id)
+                put("projectId", item.projectId)
+                put("prompt", item.prompt)
+                put("createdAtMillis", item.createdAtMillis)
+            }
+            array.put(obj)
+        }
+        preferences.edit().putString("persisted_queued_messages", array.toString()).apply()
+    }
+
+    fun loadQueuedMessages(): List<com.jarves.mh.model.QueuedFollowUp> {
+        val raw = preferences.getString("persisted_queued_messages", null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            (0 until array.length()).mapNotNull { i ->
+                val obj = array.getJSONObject(i)
+                com.jarves.mh.model.QueuedFollowUp(
+                    id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                    projectId = obj.optString("projectId"),
+                    prompt = obj.optString("prompt"),
+                    attachments = emptyList(),
+                    createdAtMillis = obj.optLong("createdAtMillis", System.currentTimeMillis()),
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
     companion object {
         val DEVICE_ONLY_KEYS = setOf(
             "runtime_setup_complete",

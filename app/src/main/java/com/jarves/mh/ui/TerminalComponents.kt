@@ -23,11 +23,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.KeyboardHide
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
@@ -38,6 +41,11 @@ import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Splitscreen
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.UnfoldLess
+import androidx.compose.material.icons.filled.UnfoldMore
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -296,16 +304,20 @@ fun TerminalCommandBar(
     var suggestedCorrection by remember { mutableStateOf<String?>(null) }
     var showBroadcastMenu by remember { mutableStateOf(false) }
     var showAgentDialog by remember { mutableStateOf(false) }
+    var isMultiline by remember { mutableStateOf(false) }
+    var showHistoryMenu by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var recentHistory by remember { mutableStateOf(listOf("ls -la", "git status", "cargo check", "python3 --version")) }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFF11141A))
             .border(width = 1.dp, color = Color(0xFF222834))
-            .padding(8.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
             .testTag("terminal_command_bar"),
     ) {
-        // Quick Action Chips Row
+        // Quick Action Chips Row (Compact slim row)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -315,7 +327,10 @@ fun TerminalCommandBar(
         ) {
             quickCommands.forEach { qc ->
                 AssistChip(
-                    onClick = { onRunCommand(qc.command) },
+                    onClick = {
+                        commandText = qc.command
+                        onRunCommand(qc.command)
+                    },
                     label = { Text(qc.label, fontSize = 11.sp, color = Color(0xFFE2E8F0)) },
                     colors = AssistChipDefaults.assistChipColors(containerColor = Color(0xFF1E232E)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF333D4F)),
@@ -349,7 +364,7 @@ fun TerminalCommandBar(
             )
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
         // Autocorrect banner
         if (autocorrectEnabled && suggestedCorrection != null) {
@@ -391,18 +406,61 @@ fun TerminalCommandBar(
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp),
+                    .heightIn(min = 44.dp, max = if (isMultiline) 120.dp else 48.dp),
                 placeholder = { Text("Command or broadcast...", fontSize = 12.sp, color = Color(0xFF64748B)) },
-                singleLine = true,
+                singleLine = !isMultiline,
+                maxLines = if (isMultiline) 5 else 1,
                 textStyle = androidx.compose.ui.text.TextStyle(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     color = Color.White,
                 ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                trailingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Multiline expansion toggle
+                        IconButton(
+                            onClick = { isMultiline = !isMultiline },
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                if (isMultiline) Icons.Default.UnfoldLess else Icons.Default.UnfoldMore,
+                                contentDescription = if (isMultiline) "Collapse input" else "Expand multiline",
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+
+                        // History popup
+                        Box {
+                            IconButton(
+                                onClick = { showHistoryMenu = true },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(Icons.Default.History, "Command history", tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                            }
+                            DropdownMenu(
+                                expanded = showHistoryMenu,
+                                onDismissRequest = { showHistoryMenu = false },
+                            ) {
+                                recentHistory.forEach { cmd ->
+                                    DropdownMenuItem(
+                                        text = { Text(cmd, fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
+                                        onClick = {
+                                            commandText = cmd
+                                            showHistoryMenu = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                keyboardOptions = KeyboardOptions(imeAction = if (isMultiline) ImeAction.Default else ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = {
                     if (commandText.isNotBlank()) {
-                        onRunCommand(commandText.trim())
+                        val toRun = commandText.trim()
+                        recentHistory = (listOf(toRun) + recentHistory).distinct().take(20)
+                        onRunCommand(toRun)
                         commandText = ""
                         suggestedCorrection = null
                     }
@@ -416,7 +474,9 @@ fun TerminalCommandBar(
             IconButton(
                 onClick = {
                     if (commandText.isNotBlank()) {
-                        onRunCommand(commandText.trim())
+                        val toRun = commandText.trim()
+                        recentHistory = (listOf(toRun) + recentHistory).distinct().take(20)
+                        onRunCommand(toRun)
                         commandText = ""
                         suggestedCorrection = null
                     }

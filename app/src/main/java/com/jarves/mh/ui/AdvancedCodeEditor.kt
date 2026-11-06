@@ -214,6 +214,7 @@ fun AdvancedCodeEditorScreen(
                 else -> {
                     CodeEditorView(
                         content = content,
+                        language = ext,
                         config = config,
                         searchQuery = searchQuery,
                         foldedLines = foldedLines,
@@ -372,6 +373,7 @@ private fun EditorIconChip(
 @Composable
 private fun CodeEditorView(
     content: String,
+    language: String = "",
     config: CodeEditorConfig,
     searchQuery: String,
     foldedLines: List<Int>,
@@ -417,6 +419,7 @@ private fun CodeEditorView(
                             CodeLineRow(
                                 lineIndex = idx,
                                 lineText = lineText,
+                                language = language,
                                 config = config,
                                 isFoldHeader = isFoldHeader,
                                 isFolded = isFolded,
@@ -483,6 +486,7 @@ private fun CodeEditorView(
 private fun CodeLineRow(
     lineIndex: Int,
     lineText: String,
+    language: String = "",
     config: CodeEditorConfig,
     isFoldHeader: Boolean,
     isFolded: Boolean,
@@ -492,6 +496,14 @@ private fun CodeLineRow(
 ) {
     val indentSpaces = lineText.takeWhile { it == ' ' }.length
     val isSearchHit = searchQuery.isNotBlank() && lineText.contains(searchQuery, ignoreCase = true)
+
+    val highlightedText = remember(lineText, language, isFolded) {
+        if (isFolded) {
+            AnnotatedString("$lineText  { ... }")
+        } else {
+            SyntaxHighlighter.highlight(lineText, language)
+        }
+    }
 
     Row(
         modifier = Modifier
@@ -557,17 +569,10 @@ private fun CodeLineRow(
             }
 
             Text(
-                text = if (isFolded) "$lineText  { ... }" else lineText,
+                text = highlightedText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = config.fontSizeSp.sp,
                 lineHeight = (config.fontSizeSp * 1.45f).sp,
-                color = when {
-                    isFolded -> Color(0xFF8B949E)
-                    lineText.trim().startsWith("//") || lineText.trim().startsWith("#") -> Color(0xFF8B949E)
-                    lineText.trim().startsWith("import ") || lineText.trim().startsWith("package ") -> Color(0xFFFF7B72)
-                    lineText.contains("class ") || lineText.contains("fun ") || lineText.contains("def ") -> Color(0xFF79C0FF)
-                    else -> Color(0xFFE2E8F0)
-                },
                 modifier = Modifier.padding(start = 6.dp, end = 12.dp),
             )
         }

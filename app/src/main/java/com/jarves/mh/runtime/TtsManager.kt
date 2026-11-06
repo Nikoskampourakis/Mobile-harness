@@ -143,7 +143,7 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
     }
 
     /**
-     * Stops any currently ongoing speech.
+     * Stops any currently ongoing speech immediately (<100ms cutoff).
      */
     fun stop() {
         try {
@@ -151,6 +151,22 @@ class TtsManager private constructor(context: Context) : TextToSpeech.OnInitList
         } catch (_: Exception) {}
         _isSpeaking.value = false
         _currentUtteranceId.value = null
+    }
+
+    fun instantInterrupt() = stop()
+
+    fun getAvailableVoices(): List<String> {
+        return runCatching {
+            tts?.voices?.filter { !it.isNetworkConnectionRequired }?.map { it.name } ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+
+    fun setVoiceByName(name: String) {
+        runCatching {
+            tts?.voices?.firstOrNull { it.name == name }?.let { voice ->
+                tts?.voice = voice
+            }
+        }
     }
 
     fun shutdown() {

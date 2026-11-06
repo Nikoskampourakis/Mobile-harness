@@ -74,8 +74,6 @@ enum class ProviderKind(
 val ProviderKind.isSubscription: Boolean
     get() = protocol in setOf(
         ProviderProtocol.CLAUDE_LOGIN,
-        ProviderProtocol.OPENCLAW_SUBSCRIPTION,
-        ProviderProtocol.HERMES_SUBSCRIPTION,
         ProviderProtocol.CODEX_SUBSCRIPTION,
     )
 
@@ -188,11 +186,11 @@ fun providerProtocolForAgent(profile: ProviderProfile, agent: AgentKind): Provid
 /** Provider choices shown for the selected coding agent. */
 fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
     AgentKind.DEEPSEEK_HARNESS -> ProviderKind.entries.filter { it in DEEPSEEK_HARNESS_PROVIDERS }
-    AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN }
+    AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { 
+        it == ProviderKind.OPENCODE_ZEN || it == ProviderKind.OPENCLAW || it == ProviderKind.HERMES 
+    }
     AgentKind.CODEX_CLI -> listOf(
         ProviderKind.CODEX,
-        ProviderKind.OPENCLAW,
-        ProviderKind.HERMES,
         ProviderKind.GEMINI,
         ProviderKind.GROK,
         ProviderKind.NVIDIA_NIM,
@@ -384,6 +382,11 @@ enum class DevStack(
         "PHP",
         "Websites and apps with PHP — classic sites and Laravel projects.",
         "php-cli, common extensions, and Composer",
+    ),
+    RUST(
+        "Rust",
+        "Systems programming, high-performance services, and WebAssembly.",
+        "rustc, cargo, and build tools",
     );
 
     val title: String get() = label
@@ -396,11 +399,13 @@ enum class DevStack(
     val guestToolPath: String get() = when (this) {
         PYTHON -> "/usr/bin/python3"
         ANDROID -> "/root/android-sdk/build-tools/35.0.0/aapt2"
+        RUST -> "/usr/bin/rustc"
         else -> ""
     }
     val guestBinaryName: String get() = when (this) {
         PYTHON -> "python3"
         ANDROID -> "aapt2"
+        RUST -> "rustc"
         else -> ""
     }
 }
@@ -636,6 +641,12 @@ enum class ActionKind {
     TERMINAL_COMMAND,
     FILE_EDIT,
     FILE_READ,
+    FILE_CREATE,
+    SKILL_USE,
+    TOOL_CALL,
+    ERROR,
+    COMPLETION,
+    PERMISSION_REQUEST,
     ZIP_ARCHIVE,
     GENERIC,
 }
@@ -649,6 +660,12 @@ data class ActivityItem(
     val diffPreview: List<DiffLine> = emptyList(),
     val commandOutput: String? = null,
     val exitCode: Int? = null,
+    val filePath: String? = null,
+    val affectedFiles: List<String> = emptyList(),
+    val durationMillis: Long? = null,
+    val skillName: String? = null,
+    val toolName: String? = null,
+    val errorMessage: String? = null,
 )
 
 enum class PlanStepStatus { PENDING, IN_PROGRESS, COMPLETED, FAILED }
@@ -670,3 +687,25 @@ data class ExecutionPlan(
     val steps: List<PlanStep> = emptyList(),
     val isApproved: Boolean = false,
 )
+
+enum class SteerStatus {
+    WAITING,
+    DELIVERED,
+    ACCEPTED,
+}
+
+data class SteerInstruction(
+    val id: String = UUID.randomUUID().toString(),
+    val text: String,
+    val status: SteerStatus = SteerStatus.WAITING,
+    val timestampMillis: Long = System.currentTimeMillis(),
+)
+
+data class QueuedFollowUp(
+    val id: String = UUID.randomUUID().toString(),
+    val projectId: String,
+    val prompt: String,
+    val attachments: List<ChatAttachment> = emptyList(),
+    val createdAtMillis: Long = System.currentTimeMillis(),
+)
+

@@ -43,6 +43,9 @@ import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.AskRequest
+import com.jarves.mh.model.QueuedFollowUp
+import com.jarves.mh.model.SteerInstruction
+import com.jarves.mh.model.SteerStatus
 import com.jarves.mh.model.AskQuestion
 import com.jarves.mh.model.TerminalOutputLine
 import com.jarves.mh.model.TerminalSession
@@ -283,13 +286,6 @@ private data class RuntimeRetryRequest(
     val provider: ProviderProfile,
 )
 
-data class QueuedFollowUp(
-    val id: String = UUID.randomUUID().toString(),
-    val projectId: String,
-    val prompt: String,
-    val attachments: List<ChatAttachment>,
-)
-
 private data class TranscriptWrite(
     val projectId: String,
     val chatId: String,
@@ -366,6 +362,9 @@ data class AppUiState(
     val previewUrl: String? = null,
     val isRunning: Boolean = false,
     val queuedFollowUps: List<QueuedFollowUp> = emptyList(),
+    val isQueuePaused: Boolean = false,
+    val activeSteeringInstructions: List<SteerInstruction> = emptyList(),
+    val isSteerMode: Boolean = false,
     val activeSessionId: String? = null,
     val toastMessage: String? = null,
     val projectTerminalLines: List<TerminalOutputLine> = emptyList(),
@@ -610,6 +609,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
+        val savedQueue = preferences.loadQueuedMessages()
+        if (savedQueue.isNotEmpty()) {
+            pendingFollowUps.addAll(savedQueue)
+            _state.update { it.copy(queuedFollowUps = savedQueue) }
+        }
         viewModelScope.launch(Dispatchers.IO) {
             storageCleaner.autoCleanIfEnabled()
             val services = PortDetector.detectListeningServices()
@@ -5172,6 +5176,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val attachments = state.value.pendingAttachments
         if (prompt.isBlank() && attachments.isEmpty()) return
         if (state.value.isRunning || state.value.androidBuildRunning) {
+            if (state.value.isSteerMode && state.value.isRunning && attachments.isEmpty()) {
+                steerActiveAgent(prompt)
+                return
+            }
             queueFollowUp(project, prompt, attachments)
             return
         }
@@ -5182,9 +5190,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         startPrompt(project, prompt, attachments)
     }
 
+    fun toggleSteerMode() {
+        _state.update { it.copy(isSteerMode = !it.isSteerMode) }
+    }
+
+    fun steerActiveAgent(instruction: String) {
+        val clean = instruction.trim()
+        if (clean.isBlank()) return
+        val steerItem = SteerInstruction(text = clean, status = SteerStatus.WAITING)
+        _state.update {
+            it.copy(
+                activeSteeringInstructions = it.activeSteeringInstructions + steerItem,
+                toastMessage = "Steering instruction sent: $clean",
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val bridge = File(getApplication<Application>().filesDir, "runtime-bridge")
+                bridge.mkdirs()
+                val steerFile = File(bridge, "steer_${steerItem.id}.json")
+                val obj = JSONObject().apply {
+                    put("id", steerItem.id)
+                    put("text", clean)
+                    put("timestamp", steerItem.timestampMillis)
+                }
+                steerFile.writeText(obj.toString())
+                File(bridge, "steer.json").writeText(obj.toString())
+            }
+            delay(150)
+            _state.update { current ->
+                current.copy(
+                    activeSteeringInstructions = current.activeSteeringInstructions.map {
+                        if (it.id == steerItem.id) it.copy(status = SteerStatus.DELIVERED) else it
+                    },
+                    activity = listOf(
+                        ActivityItem(
+                            title = "Steering Instruction Delivered",
+                            detail = clean,
+                            isComplete = true,
+                            kind = ActionKind.GENERIC,
+                        ),
+                    ) + current.activity,
+                )
+            }
+        }
+    }
+
     private fun queueFollowUp(project: Project, prompt: String, attachments: List<ChatAttachment>) {
         val requestText = prompt.trim().ifBlank { "Please review the attached files." }
-        pendingFollowUps.addLast(QueuedFollowUp(projectId = project.id, prompt = requestText, attachments = attachments))
+        val item = QueuedFollowUp(projectId = project.id, prompt = requestText, attachments = attachments)
+        pendingFollowUps.addLast(item)
         _state.update {
             it.copy(
                 pendingAttachments = emptyList(),
@@ -5192,29 +5247,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 toastMessage = str(R.string.an_follow_up_queued),
             )
         }
+        preferences.saveQueuedMessages(pendingFollowUps.toList())
     }
 
-    fun steerQueuedFollowUp(id: String) {
-        if (steeringToFollowUp) return
+    fun toggleQueuePause() {
+        val newPaused = !_state.value.isQueuePaused
+        _state.update { it.copy(isQueuePaused = newPaused) }
+        if (!newPaused && !_state.value.isRunning && pendingFollowUps.isNotEmpty()) {
+            startNextFollowUp()
+        }
+    }
+
+    fun editQueuedFollowUp(id: String, newPrompt: String) {
+        val list = pendingFollowUps.toMutableList()
+        val index = list.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            list[index] = list[index].copy(prompt = newPrompt)
+            pendingFollowUps.clear()
+            pendingFollowUps.addAll(list)
+            _state.update { it.copy(queuedFollowUps = pendingFollowUps.toList()) }
+            preferences.saveQueuedMessages(pendingFollowUps.toList())
+        }
+    }
+
+    fun sendNextQueuedFollowUp(id: String) {
         val selected = pendingFollowUps.firstOrNull { it.id == id } ?: return
         pendingFollowUps.remove(selected)
         pendingFollowUps.addFirst(selected)
         _state.update {
             it.copy(
                 queuedFollowUps = pendingFollowUps.toList(),
-                toastMessage = str(R.string.an_steering_to_follow_up),
+                toastMessage = str(R.string.an_follow_up_queued),
             )
         }
-        when {
-            _state.value.isRunning -> {
-                steeringToFollowUp = true
-                viewModelScope.launch { activeRuntime().stopActiveSession() }
-            }
-            _state.value.androidBuildRunning -> {
-                steeringToFollowUp = true
-                cancelAndroidBuild()
-            }
-            else -> startNextFollowUp()
+        preferences.saveQueuedMessages(pendingFollowUps.toList())
+        if (!_state.value.isRunning && !_state.value.isQueuePaused) {
+            startNextFollowUp()
+        }
+    }
+
+    fun steerQueuedFollowUp(id: String) {
+        val selected = pendingFollowUps.firstOrNull { it.id == id } ?: return
+        pendingFollowUps.remove(selected)
+        _state.update {
+            it.copy(
+                queuedFollowUps = pendingFollowUps.toList(),
+            )
+        }
+        preferences.saveQueuedMessages(pendingFollowUps.toList())
+        if (_state.value.isRunning) {
+            steerActiveAgent(selected.prompt)
+        } else {
+            val proj = _state.value.activeProject ?: return
+            startPrompt(proj, selected.prompt, selected.attachments)
         }
     }
 
@@ -5222,6 +5307,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val selected = pendingFollowUps.firstOrNull { it.id == id } ?: return
         pendingFollowUps.remove(selected)
         _state.update { it.copy(queuedFollowUps = pendingFollowUps.toList()) }
+        preferences.saveQueuedMessages(pendingFollowUps.toList())
     }
 
     private fun startPrompt(project: Project, prompt: String, attachments: List<ChatAttachment>) {
@@ -5247,7 +5333,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         touchProject(project.id)
         persistMessages()
         val history = state.value.messages // includes all messages up to now
-        val runtimePrompt = if (attachments.isEmpty()) requestText else buildString {
+        val activeSteers = state.value.activeSteeringInstructions.filter { it.status != SteerStatus.ACCEPTED }
+        val steerSection = if (activeSteers.isNotEmpty()) {
+            buildString {
+                appendLine("<user_steering_instructions>")
+                activeSteers.forEach { appendLine("- ${it.text}") }
+                appendLine("</user_steering_instructions>")
+                appendLine()
+            }
+        } else ""
+        val runtimePrompt = steerSection + if (attachments.isEmpty()) requestText else buildString {
             appendLine(requestText)
             appendLine()
             appendLine("<attached_files>")
@@ -5293,18 +5388,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startNextFollowUp() {
+        if (_state.value.isQueuePaused) return
         val next = if (pendingFollowUps.isEmpty()) null else pendingFollowUps.removeFirst()
         if (next == null) {
             _state.update { it.copy(queuedFollowUps = emptyList()) }
+            preferences.saveQueuedMessages(emptyList())
             return
         }
         val project = _state.value.activeProject
         if (project == null || project.id != next.projectId) {
             pendingFollowUps.clear()
             _state.update { it.copy(queuedFollowUps = emptyList()) }
+            preferences.saveQueuedMessages(emptyList())
             return
         }
         _state.update { it.copy(queuedFollowUps = pendingFollowUps.toList()) }
+        preferences.saveQueuedMessages(pendingFollowUps.toList())
         startPrompt(project, next.prompt, next.attachments)
     }
 
@@ -5666,6 +5765,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             current.activity.map { if (!it.isComplete) it.copy(isComplete = true) else it },
                         taskFinishedAtMillis = finishedAt,
                         currentTaskRequest = null,
+                        activeSteeringInstructions = current.activeSteeringInstructions.map {
+                            it.copy(status = SteerStatus.ACCEPTED)
+                        },
                     )
                 }
                 is RuntimeEvent.SessionFailed -> {

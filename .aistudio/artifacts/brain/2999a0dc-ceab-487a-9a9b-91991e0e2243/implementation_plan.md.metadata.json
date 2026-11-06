@@ -1,6 +1,6 @@
 {
-  "summary": "Comprehensive architectural implementation plan for Phase 2-5 Core Terminal UX, multi-session tabs, command bar, profiles, visual skins, revamped planning mode top progress bar, Antigravity harness installer fix, and XAI/Gemini provider reimplementations.",
-  "updatedAt": "2026-10-14T11:41:30.639927471Z",
+  "summary": "Architectural design and execution plan for the Mobile Harness Live Agent Experience & Core UI Overhaul:\n- Live Voice Mode with continuous STT, local neural/system TTS engine, camera frame streaming for vision-capable agents, keyboard input, and voice settings.\n- Agent Activity Normalization & Execution Visualization (reading, editing, creating, running commands, thinking events, skill usage).\n- Project Artifact Viewer panel with created/modified files, generated images, documents, and code previews.\n- Advanced Markdown rendering with LaTeX math ($...$, $$...$$), tables, and universal syntax-highlighted code blocks.\n- Real Steer Mode without process termination and FIFO Persistent Message Queue with pause/resume and editing.\n- Agent and Subscription cleanup removing Hermes/OpenClaw from subscription provider lists.\n- Mobile Terminal overhaul with compact contextual command bar and keyboard optimization.\n- Multi-language Syntax Highlighting engine and Rust DevStack toolchain installation.",
+  "updatedAt": "2026-11-06T11:55:33.805278059Z",
   "requestFeedback": true,
   "userFacing": true
 }
