@@ -57,9 +57,14 @@ import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.*
 import androidx.compose.ui.text.style.*
 import androidx.compose.ui.text.input.*
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.layout.*
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.window.core.layout.WindowSizeClass
+import androidx.window.core.layout.WindowWidthSizeClass
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jarves.mh.ui.theme.AppThemeMode
@@ -1077,7 +1082,10 @@ private fun IconOption(
 }
 
 @Composable
-fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
+fun PocketDevApp(
+    viewModel: MainViewModel = viewModel(),
+    windowSizeClass: WindowSizeClass,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val projectsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
@@ -1231,6 +1239,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
         )
         state.activeProject != null && state.workspaceVisible -> WorkspaceScreen(
             state = state,
+            windowSizeClass = windowSizeClass,
             onBack = viewModel::closeProject,
             onSend = viewModel::sendPrompt,
             onStop = viewModel::stopTask,
@@ -1353,6 +1362,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             viewModel,
             projectsListState,
             screen = currentRootScreen,
+            windowSizeClass = windowSizeClass,
             onScreenChange = { currentRootScreen = it },
             onOpenDrawer = { scope.launch { drawerState.open() } }
         )
@@ -3092,6 +3102,7 @@ private fun RootScreenHost(
     viewModel: MainViewModel,
     projectsListState: LazyListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() },
     screen: RootScreen = RootScreen.PROJECTS,
+    windowSizeClass: WindowSizeClass,
     onScreenChange: (RootScreen) -> Unit = {},
     onOpenDrawer: () -> Unit = {},
 ) {
@@ -3102,20 +3113,43 @@ private fun RootScreenHost(
     val terminalLiveOutput by viewModel.terminalLiveOutput.collectAsStateWithLifecycle()
     val terminalCurrentCommand by viewModel.terminalCurrentCommand.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val navSuiteType = if (windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.EXPANDED) {
+        NavigationSuiteType.NavigationRail
+    } else {
+        NavigationSuiteType.NavigationBar
+    }
+    val showNavigationIcon = navSuiteType == NavigationSuiteType.NavigationBar || navSuiteType == NavigationSuiteType.NavigationRail
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                title = { Text(screen.label) },
-                navigationIcon = { IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, "Menu") } },
-                actions = {
-                    IconButton(onClick = viewModel::toggleTheme) {
-                        Icon(if (state.themeMode == AppThemeMode.DARK) Icons.Default.LightMode else Icons.Default.DarkMode, null)
-                    }
-                }
-            )
+    NavigationSuiteScaffold(
+        navigationSuiteItems = {
+            RootScreen.entries.forEach { rootScreen ->
+                item(
+                    icon = { Icon(rootScreen.icon, contentDescription = null) },
+                    label = { Text(rootScreen.label) },
+                    selected = screen == rootScreen,
+                    onClick = { onScreenChange(rootScreen) }
+                )
+            }
         },
+        layoutType = navSuiteType
+    ) {
+        Scaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                TopAppBar(
+                    title = { Text(screen.label) },
+                    navigationIcon = {
+                        if (showNavigationIcon) {
+                            IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, "Menu") }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = viewModel::toggleTheme) {
+                            Icon(if (state.themeMode == AppThemeMode.DARK) Icons.Default.LightMode else Icons.Default.DarkMode, null)
+                        }
+                    }
+                )
+            },
         bottomBar = {},
         floatingActionButton = {
             if (screen == RootScreen.PROJECTS && !keyboardVisible && !showQuickTerminal) {
@@ -3133,6 +3167,7 @@ private fun RootScreenHost(
             when (screen) {
                 RootScreen.PROJECTS -> ProjectsScreen(
                     state = state,
+                    windowSizeClass = windowSizeClass,
                     listState = projectsListState,
                     onOpen = viewModel::openProject,
                     onCreate = viewModel::createProject,
@@ -3236,6 +3271,8 @@ private fun RootScreenHost(
                     onSetConfirmDestructiveCommands = viewModel::setConfirmDestructiveCommands,
                     onSetConfirmFileDeletion = viewModel::setConfirmFileDeletion,
                     onSetConfirmGitPush = viewModel::setConfirmGitPush,
+                    onSetPreferredBackend = viewModel::setPreferredBackend,
+                    onSetNextRuntimeVersion = viewModel::setNextRuntimeVersion,
                 )
             }
             if (state.ttsIsSpeaking) {
@@ -3269,29 +3306,62 @@ private fun RootScreenHost(
                     }
                 }
             }
+            if (state.showUbuntu24UpgradeDialog) {
+                AlertDialog(
+                    onDismissRequest = viewModel::dismissUbuntu24UpgradePrompt,
+                    icon = { Icon(Icons.Default.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    title = { Text("Upgrade to Ubuntu 24.04 LTS?", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "Mobile Harness has upgraded default runtime to Ubuntu 24.04 LTS (Noble Numbat).",
+                                fontSize = 13.sp,
+                            )
+                            Text(
+                                "• glibc 2.39+ for Python 3.12, C++20/Rust, and modern binary tools.\n" +
+                                "• PRoot clone3 syscall translation.\n" +
+                                "• Ready for AVF hardware acceleration.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = viewModel::acceptUbuntu24Upgrade) {
+                            Text("Upgrade to 24.04 LTS")
+                        }
+                    },
+                    dismissButton = {
+                        OutlinedButton(onClick = viewModel::dismissUbuntu24UpgradePrompt) {
+                            Text("Skip for now")
+                        }
+                    },
+                )
+            }
+            if (showQuickTerminal) {
+                QuickTerminalSheet(
+                    onDismiss = { showQuickTerminal = false },
+                ) {
+                    TerminalScreen(
+                        lines = terminalLines,
+                        isRunning = isTerminalRunning,
+                        onRun = viewModel::runTerminalCommand,
+                        onInput = viewModel::sendTerminalInput,
+                        onInterrupt = viewModel::interruptTerminalCommand,
+                        onClear = viewModel::clearTerminal,
+                        onToggleTheme = viewModel::toggleTheme,
+                        themeMode = state.themeMode,
+                        liveOutput = terminalLiveOutput,
+                        currentCommand = terminalCurrentCommand,
+                        showThemeAction = false,
+                        showQuickCommands = true,
+                        compactHeader = true,
+                    )
+                }
+            }
         }
     }
-    if (showQuickTerminal) {
-        QuickTerminalSheet(
-            onDismiss = { showQuickTerminal = false },
-        ) {
-            TerminalScreen(
-                lines = terminalLines,
-                isRunning = isTerminalRunning,
-                onRun = viewModel::runTerminalCommand,
-                onInput = viewModel::sendTerminalInput,
-                onInterrupt = viewModel::interruptTerminalCommand,
-                onClear = viewModel::clearTerminal,
-                onToggleTheme = viewModel::toggleTheme,
-                themeMode = state.themeMode,
-                liveOutput = terminalLiveOutput,
-                currentCommand = terminalCurrentCommand,
-                showThemeAction = false,
-                showQuickCommands = true,
-                compactHeader = true,
-            )
-        }
-    }
+}
 }
 
 @Composable
@@ -4263,6 +4333,7 @@ private fun ClaudeSubscriptionCredentialsStep(
 @Composable
 private fun ProjectsScreen(
     state: AppUiState,
+    windowSizeClass: WindowSizeClass,
     listState: LazyListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() },
     onOpen: (Project) -> Unit,
     onCreate: (String) -> Unit,
@@ -4305,6 +4376,10 @@ private fun ProjectsScreen(
     LaunchedEffect(state.appUpdate?.versionCode) {
         if (state.appUpdate != null) showUpdateDialog = true
     }
+    val isExpanded = windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.EXPANDED
+    var selectedProjectId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedProject = projects.firstOrNull { it.id == selectedProjectId } ?: projects.firstOrNull()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -4319,12 +4394,100 @@ private fun ProjectsScreen(
             )
         },
     ) { padding ->
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        if (isExpanded) {
+            Row(modifier = Modifier.fillMaxSize().padding(padding)) {
+                // List Pane
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    contentPadding = PaddingValues(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    item {
+                        Text("Build from your phone", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Text("Chat, review changes, and preview your project.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(16.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Button(
+                                onClick = onCreateQuickProject,
+                                modifier = Modifier.weight(1f).height(48.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                            ) {
+                                Icon(Icons.Default.Chat, null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Quick project", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { showCreate = true },
+                                modifier = Modifier.weight(1f).height(48.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                            ) {
+                                Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("New project", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    
+                    if (projects.isEmpty()) {
+                        item {
+                            EmptyProjectsPlaceholder()
+                        }
+                    } else {
+                        items(projects, key = { it.id }) { proj ->
+                            ProjectCard(
+                                project = proj,
+                                isSelected = proj.id == selectedProjectId,
+                                taskRunning = state.isRunning && state.activeProject?.id == proj.id,
+                                terminalRunning = state.projectTerminalRunning && state.activeProject?.id == proj.id,
+                                onOpen = { onOpen(proj) },
+                                onClick = { selectedProjectId = proj.id },
+                                onRename = { newName -> onRenameProject(proj.id, newName) },
+                                onDelete = { onDeleteProject(proj.id) },
+                                onUnlinkGitHub = if (state.githubLogin != null) { { onDisconnectGitHub() } } else null,
+                            )
+                        }
+                    }
+                }
+
+                VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // Detail Pane
+                Box(modifier = Modifier.weight(1.5f).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+                    if (selectedProject != null) {
+                        ProjectDetailView(
+                            project = selectedProject,
+                            onOpen = { onOpen(selectedProject) },
+                            onRename = { newName -> onRenameProject(selectedProject.id, newName) },
+                            onDelete = { onDeleteProject(selectedProject.id) }
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Default.Folder, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
+                            Spacer(Modifier.height(16.dp))
+                            Text("Select a project to view details", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
             item {
                 Text("Build from your phone", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text("Chat, review changes, and preview your project.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -4564,17 +4727,6 @@ private fun ProjectsScreen(
                         }
                     }
                 }
-            } else {
-                items(projects, key = { it.id }) { proj ->
-                    ProjectCard(
-                        project = proj,
-                        taskRunning = state.isRunning && state.activeProject?.id == proj.id,
-                        terminalRunning = state.projectTerminalRunning && state.activeProject?.id == proj.id,
-                        onOpen = { onOpen(proj) },
-                        onRename = { newName -> onRenameProject(proj.id, newName) },
-                        onDelete = { onDeleteProject(proj.id) },
-                        onUnlinkGitHub = if (state.githubLogin != null) { { onDisconnectGitHub() } } else null,
-                    )
                 }
             }
         }
@@ -4879,9 +5031,11 @@ private fun ApiStatusChip(state: AppUiState, onSettings: () -> Unit, onPing: () 
 @Composable
 private fun ProjectCard(
     project: Project,
+    isSelected: Boolean = false,
     taskRunning: Boolean,
     terminalRunning: Boolean,
     onOpen: () -> Unit,
+    onClick: () -> Unit = onOpen,
     onRename: (String) -> Unit,
     onDelete: () -> Unit,
     onUnlinkGitHub: (() -> Unit)? = null,
@@ -4891,7 +5045,17 @@ private fun ProjectCard(
     var showDelete by rememberSaveable(project.id) { mutableStateOf(false) }
     var showUnlinkConfirm by rememberSaveable(project.id) { mutableStateOf(false) }
     var renameText by rememberSaveable(project.id) { mutableStateOf(project.name) }
-    Card(Modifier.fillMaxWidth().clickable(onClick = onOpen), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .hoverable(remember { MutableInteractionSource() }),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface,
+            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+        ),
+        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+    ) {
         Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                 Icon(iconFromName(project.icon, Icons.Default.Folder), null, Modifier.padding(13.dp), tint = PocketOrange)
@@ -4987,6 +5151,113 @@ private fun ProjectCard(
     }
 }
 
+@Composable
+private fun ProjectDetailView(
+    project: Project,
+    onOpen: () -> Unit,
+    onRename: (String) -> Unit,
+    onDelete: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)) {
+                Icon(iconFromName(project.icon, Icons.Default.Folder), null, Modifier.padding(20.dp).size(40.dp), tint = PocketOrange)
+            }
+            Spacer(Modifier.width(20.dp))
+            Column(Modifier.weight(1f)) {
+                Text(project.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Project ID: ${project.id}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        
+        Spacer(Modifier.height(24.dp))
+        
+        Text("Description", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(if (project.kind == ProjectKind.QUICK_PROJECT) "Quickly created conversational workspace." else project.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        
+        Spacer(Modifier.height(16.dp))
+        
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        
+        Spacer(Modifier.height(16.dp))
+        
+        DetailItem(label = "Language", value = project.language, icon = Icons.Default.Code)
+        DetailItem(label = "Working Directory", value = "/workspace/${project.slug}", icon = Icons.Default.Dns)
+        DetailItem(label = "Last Updated", value = project.formattedUpdatedAt, icon = Icons.Default.Schedule)
+        
+        Spacer(Modifier.height(32.dp))
+        
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(
+                onClick = onOpen,
+                modifier = Modifier.weight(1f).height(56.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Default.Launch, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Open Workspace", fontWeight = FontWeight.Bold)
+            }
+            
+            OutlinedButton(
+                onClick = { /* Could open more options */ },
+                modifier = Modifier.height(56.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Default.Settings, null)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailItem(label: String, value: String, icon: ImageVector) {
+    Row(modifier = Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun EmptyProjectsPlaceholder() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                Icons.Default.FolderOpen,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "No projects yet",
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                "Create a starter project or import an existing repository above.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReadOnlyProjectScreen(
@@ -5079,6 +5350,7 @@ private fun ReadOnlyProjectScreen(
 @Composable
 private fun WorkspaceScreen(
     state: AppUiState,
+    windowSizeClass: WindowSizeClass,
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
@@ -5367,6 +5639,8 @@ private fun WorkspaceScreen(
     }
 
     var selectedTab by rememberSaveable { mutableStateOf(WorkspaceTab.CHAT) }
+    var showMoreSheet by rememberSaveable { mutableStateOf(false) }
+
     val activeChat = state.projectChats.firstOrNull { it.id == state.activeChatId }
 
     // If a file is open, show the FileViewerScreen on top
@@ -5471,32 +5745,71 @@ private fun WorkspaceScreen(
             },
         )
     }
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column(Modifier.fillMaxWidth()) {
-                        Text(
-                            state.activeProject?.name.orEmpty(),
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.combinedClickable(
-                                onClick = {},
-                                onLongClick = {
-                                    Toast.makeText(context, state.activeProject?.name.orEmpty(), Toast.LENGTH_LONG).show()
-                                },
-                            ),
-                        )
-                        Text(
-                            "${activeChat?.title ?: "Chat"} · ${if (state.agentKind == AgentKind.ANTIGRAVITY) state.agentKind.title else state.provider.kind.title}",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
+    val navSuiteType = if (windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.EXPANDED) {
+        NavigationSuiteType.NavigationRail
+    } else {
+        NavigationSuiteType.NavigationBar
+    }
+    val showNavigationIcon = navSuiteType == NavigationSuiteType.NavigationBar || navSuiteType == NavigationSuiteType.NavigationRail
+
+    NavigationSuiteScaffold(
+        navigationSuiteItems = {
+            WorkspaceTab.entries.forEach { tab ->
+                item(
+                    icon = { Icon(tab.icon, contentDescription = null) },
+                    label = { Text(tab.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                    selected = selectedTab == tab,
+                    onClick = {
+                        selectedTab = tab
+                        if (tab == WorkspaceTab.FILES) onRefreshFiles()
                     }
-                },
-                navigationIcon = { IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, "Menu") } },
+                )
+            }
+        },
+        layoutType = navSuiteType
+    ) {
+        Scaffold(
+            modifier = Modifier.onKeyEvent { event ->
+                if (event.isCtrlPressed && event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.N -> { onCreateChat(); true }
+                        Key.T -> { selectedTab = WorkspaceTab.TERMINAL; true }
+                        Key.F -> { selectedTab = WorkspaceTab.FILES; onRefreshFiles(); true }
+                        Key.P -> { selectedTab = WorkspaceTab.PREVIEW; true }
+                        Key.R -> { onRefreshWorkspace(); true }
+                        else -> false
+                    }
+                } else false
+            },
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(
+                                state.activeProject?.name.orEmpty(),
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.combinedClickable(
+                                    onClick = {},
+                                    onLongClick = {
+                                        Toast.makeText(context, state.activeProject?.name.orEmpty(), Toast.LENGTH_LONG).show()
+                                    },
+                                ),
+                            )
+                            Text(
+                                "${activeChat?.title ?: "Chat"} · ${if (state.agentKind == AgentKind.ANTIGRAVITY) state.agentKind.title else state.provider.kind.title}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        if (showNavigationIcon) {
+                            IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, "Menu") }
+                        }
+                    },
                 actions = {
                     if (isAndroidProject) {
                         IconButton(
@@ -5534,6 +5847,19 @@ private fun WorkspaceScreen(
                         }
                     }
                     IconButton(
+                        onClick = onRefreshWorkspace,
+                    ) {
+                        if (state.isRefreshing) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Refresh workspace",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    IconButton(
                         onClick = { showChatSwitcher = true },
                     ) {
                         Icon(
@@ -5566,20 +5892,11 @@ private fun WorkspaceScreen(
                         }
                     }
                     IconButton(
-                        onClick = onOpenUiStyles,
+                        onClick = { showMoreSheet = true },
                     ) {
                         Icon(
-                            Icons.Default.Palette,
-                            contentDescription = "UI Styles & Themes",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(
-                        onClick = onOpenProjectSecrets,
-                    ) {
-                        Icon(
-                            Icons.Default.VpnKey,
-                            contentDescription = "Project API Keys & Secrets",
+                            Icons.Default.MoreVert,
+                            contentDescription = "More actions",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -5588,415 +5905,243 @@ private fun WorkspaceScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
-        bottomBar = {
-            if (!keyboardVisible) {
-                var showMoreSheet by rememberSaveable { mutableStateOf(false) }
-
-                Surface(
-                    shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-                    tonalElevation = 4.dp,
-                    modifier = Modifier.fillMaxWidth(),
+    ) { padding ->
+        if (showMoreSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showMoreSheet = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = MaterialTheme.colorScheme.surface,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .navigationBarsPadding(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceAround,
-                        verticalAlignment = Alignment.CenterVertically,
+                    Text(
+                        "More Options & Actions",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    // Open in File Explorer
+                    Surface(
+                        onClick = {
+                            showMoreSheet = false
+                            state.activeProject?.let { openFolderInFileManager(context, it) }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        WorkspaceTab.entries.forEach { tab ->
-                            val isSelected = selectedTab == tab
-                            Surface(
-                                selected = isSelected,
-                                onClick = {
-                                    selectedTab = tab
-                                    if (tab == WorkspaceTab.FILES) onRefreshFiles()
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = 2.dp),
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(vertical = 6.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center,
-                                ) {
-                                    Icon(
-                                        imageVector = tab.icon,
-                                        contentDescription = tab.name,
-                                        modifier = Modifier.size(20.dp),
-                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        text = when (tab) {
-                                            WorkspaceTab.CHAT -> "Chat"
-                                            WorkspaceTab.TERMINAL -> "Terminal"
-                                            WorkspaceTab.FILES -> "Files"
-                                            WorkspaceTab.PREVIEW -> "Preview"
-                                        },
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-
-                        // Refresh button
-                        Surface(
-                            onClick = { onRefreshWorkspace() },
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color.Transparent,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 2.dp),
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column(
-                                modifier = Modifier.padding(vertical = 6.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                            ) {
-                                if (state.isRefreshing) {
-                                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                                } else {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = "Refresh",
-                                        modifier = Modifier.size(20.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    text = "Refresh",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-
-                        // More Menu button
-                        Surface(
-                            onClick = { showMoreSheet = true },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (showMoreSheet) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 2.dp),
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(vertical = 6.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                            ) {
-                                Icon(
-                                    Icons.Default.MoreHoriz,
-                                    contentDescription = "More",
-                                    modifier = Modifier.size(20.dp),
-                                    tint = if (showMoreSheet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    text = "More",
-                                    fontSize = 11.sp,
-                                    color = if (showMoreSheet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                            Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text("Open in Android File Explorer", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("Browse in Files app / Acode via Storage Access Provider", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
-                }
 
-                if (showMoreSheet) {
-                    ModalBottomSheet(
-                        onDismissRequest = { showMoreSheet = false },
-                        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                        containerColor = MaterialTheme.colorScheme.surface,
+                    // Project Folder & Paths
+                    Surface(
+                        onClick = {
+                            showMoreSheet = false
+                            projectPathTarget = state.activeProject
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .navigationBarsPadding(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                "More Options & Actions",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            )
-
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                            // Open in File Explorer
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    state.activeProject?.let { openFolderInFileManager(context, it) }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text("Open in Android File Explorer", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("Browse in Files app / Acode via Storage Access Provider", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
+                            Icon(Icons.Default.FolderOpen, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text("Project Folder & Acode Paths", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("View guest path /workspace/${state.activeProject?.slug} & storage info", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-
-                            // Project Folder & Paths
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    projectPathTarget = state.activeProject
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.FolderOpen, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text("Project Folder & Acode Paths", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("View guest path /workspace/${state.activeProject?.slug} & storage info", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-
-                            // Execution Permissions
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    showPermissionsDialog = true
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.Security, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text("Permissions (${state.activeProject?.permissionMode?.title ?: "Approval"})", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("Control how edits and commands are approved", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-
-                            // Live Link Sharing
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    showShareDialog = true
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.Link, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text(if (state.shareServerState.isRunning) "Share Link (Active)" else "Share via Live Link", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("Live browser preview and real-time collaboration", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-
-                            // Sync to Device Folder (if configured)
-                            if (state.activeProject?.externalFolderPath != null) {
-                                Surface(
-                                    onClick = {
-                                        showMoreSheet = false
-                                        state.activeProject?.let { onSyncWorkspaceToExternalFolder(context, it) }
-                                        Toast.makeText(context, "Syncing changes to device folder…", Toast.LENGTH_SHORT).show()
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(Icons.Default.Sync, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                                        Spacer(Modifier.width(14.dp))
-                                        Column {
-                                            Text("Sync to Device Folder", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                            Text("Write AI modifications back into linked external directory", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Fork Chat
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    onForkChat(null)
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.CallSplit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text("Fork Chat", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("Branch conversation into a separate chat history", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-
-                            // Project Chats & History
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    showChatSwitcher = true
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text("Project Chats (${state.projectChats.size})", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("Switch, create, rename, or delete conversation threads", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-
-                            // Customize Chat
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    customizeTarget = CustomizeTarget.Chat(state.activeProject?.id ?: "", state.activeChatId ?: "")
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text("Customize Chat", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("Appearance, colors, and layout customizations", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-
-                            // Export Project (.zip)
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    exportProjectLauncher.launch("${state.activeProject?.slug ?: "project"}.zip")
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.Share, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text("Export Project (.zip)", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("Download workspace archive to device", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-
-                            // Push to GitHub
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    showGitPushDialog = true
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.CloudUpload, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text("Push to GitHub", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("Commit and push repository without manual zip", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-
-                            // Settings
-                            Surface(
-                                onClick = {
-                                    showMoreSheet = false
-                                    onOpenDrawer()
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.Settings, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-                                    Spacer(Modifier.width(14.dp))
-                                    Column {
-                                        Text("Settings & Drawer", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text("Models, providers, and app configuration", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-
-                            Spacer(Modifier.height(14.dp))
                         }
                     }
+
+                    // Execution Permissions
+                    Surface(
+                        onClick = {
+                            showMoreSheet = false
+                            showPermissionsDialog = true
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.Security, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text("Permissions (${state.activeProject?.permissionMode?.title ?: "Approval"})", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("Control how edits and commands are approved", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    // Live Link Sharing
+                    Surface(
+                        onClick = {
+                            showMoreSheet = false
+                            showShareDialog = true
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.Link, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text(if (state.shareServerState.isRunning) "Share Link (Active)" else "Share via Live Link", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("Live browser preview and real-time collaboration", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    // Sync to Device Folder (if configured)
+                    if (state.activeProject?.externalFolderPath != null) {
+                        Surface(
+                            onClick = {
+                                showMoreSheet = false
+                                state.activeProject?.let { onSyncWorkspaceToExternalFolder(context, it) }
+                                Toast.makeText(context, "Syncing changes to device folder…", Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Default.Sync, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                                Spacer(Modifier.width(14.dp))
+                                Column {
+                                    Text("Sync to Device Folder", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    Text("Write AI modifications back into linked external directory", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+
+                    // Fork Chat
+                    Surface(
+                        onClick = {
+                            showMoreSheet = false
+                            onForkChat(null)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.CallSplit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text("Fork Chat", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("Branch conversation into a separate chat history", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    // Project Chats & History
+                    Surface(
+                        onClick = {
+                            showMoreSheet = false
+                            showChatSwitcher = true
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text("Project Chats (${state.projectChats.size})", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("Switch, create, rename, or delete conversation threads", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    // UI Styles & Themes
+                    Surface(
+                        onClick = {
+                            showMoreSheet = false
+                            onOpenUiStyles()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text("UI Styles & Themes", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("Personalize the look and feel of the workspace", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    // Project Secrets
+                    Surface(
+                        onClick = {
+                            showMoreSheet = false
+                            onOpenProjectSecrets()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.VpnKey, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text("Project API Keys & Secrets", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("Manage encrypted keys and sensitive configurations", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(14.dp))
                 }
             }
-        },
-    ) { padding ->
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -6089,6 +6234,7 @@ private fun WorkspaceScreen(
                         val activeSession = state.terminalSessions.firstOrNull { it.id == state.activeTerminalSessionId } ?: state.terminalSessions.firstOrNull()
                         val splitSession = state.terminalSessions.firstOrNull { it.id == state.splitTerminalSessionId }
                         TerminalScreen(
+                            windowSizeClass = windowSizeClass,
                             lines = activeSession?.lines ?: state.projectTerminalLines,
                             isRunning = activeSession?.isRunning ?: state.projectTerminalRunning,
                             onRun = onTerminalRun,
@@ -6133,6 +6279,7 @@ private fun WorkspaceScreen(
                     }
                     WorkspaceTab.FILES -> com.jarves.mh.ui.CodeWorkspaceTab(
                         activeProject = state.activeProject,
+                        windowSizeClass = windowSizeClass,
                         files = state.workspaceFiles,
                         loading = state.filesLoading,
                         changes = state.changes,
@@ -6152,6 +6299,7 @@ private fun WorkspaceScreen(
                         githubRepositories = state.githubRepositories,
                         terminalScreen = {
                             TerminalScreen(
+                                windowSizeClass = windowSizeClass,
                                 lines = state.projectTerminalLines,
                                 isRunning = state.projectTerminalRunning,
                                 onRun = onTerminalRun,
@@ -6220,6 +6368,7 @@ private fun WorkspaceScreen(
             )
         }
     }
+}
 }
 }
 

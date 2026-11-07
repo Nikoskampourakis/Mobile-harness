@@ -211,6 +211,9 @@
     <string name="provider_skip_setup_later">Παράλειψη, ρύθμιση αργότερα στις Ρυθμίσεις</string>
     <string name="provider_beta">Beta</string>
     <string name="provider_title_claude">Συνδρομή Claude</string>
+    <string name="provider_title_openclaw">OpenClaw</string>
+    <string name="provider_title_hermes">Hermes Agent</string>
+    <string name="provider_title_codex">Codex</string>
     <string name="provider_title_anthropic">Anthropic API</string>
     <string name="provider_title_openrouter">OpenRouter</string>
     <string name="provider_title_deepseek">DeepSeek</string>
@@ -219,6 +222,9 @@
     <string name="provider_title_nvidia">NVIDIA NIM</string>
     <string name="provider_title_custom">Προσαρμοσμένο API</string>
     <string name="provider_subtitle_claude">Pro, Max, Team ή Enterprise</string>
+    <string name="provider_subtitle_openclaw">Token συνεδρίας συνδρομής OpenClaw</string>
+    <string name="provider_subtitle_hermes">Σύνδεση συνδρομής agent Hermes</string>
+    <string name="provider_subtitle_codex">Σύνδεση συνδρομής OpenAI Codex</string>
     <string name="provider_subtitle_anthropic">Χρέωση χρήσης μέσω Console</string>
     <string name="provider_subtitle_openrouter">Χρήση του κλειδιού API του OpenRouter</string>
     <string name="provider_subtitle_deepseek">Χρήση του κλειδιού API του DeepSeek</string>

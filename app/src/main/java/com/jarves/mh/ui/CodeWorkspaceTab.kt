@@ -76,6 +76,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.VerticalDivider
+import androidx.window.core.layout.WindowSizeClass
+import androidx.window.core.layout.WindowWidthSizeClass
 import com.jarves.mh.model.ChangeItem
 import com.jarves.mh.model.DiffLine
 import com.jarves.mh.model.DiffLineType
@@ -94,6 +97,7 @@ enum class CodeSubTab {
 @Composable
 fun CodeWorkspaceTab(
     activeProject: com.jarves.mh.model.Project?,
+    windowSizeClass: WindowSizeClass,
     files: List<WorkspaceEntry>,
     loading: Boolean,
     changes: List<ChangeItem>,
@@ -195,34 +199,67 @@ fun CodeWorkspaceTab(
             }
         }
 
-        Box(Modifier.weight(1f)) {
-            when (selectedSubTab) {
-                CodeSubTab.TREE -> FileTreeView(
-                    activeProject = activeProject,
-                    files = files,
-                    loading = loading,
-                    changes = changes,
-                    suggestedProjectRoot = suggestedProjectRoot,
-                    onRefresh = onRefresh,
-                    onOpenFile = onOpenFile,
-                    onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
-                    onExport = onExport,
-                )
-                CodeSubTab.ARTIFACTS -> ProjectArtifactsView(
-                    project = activeProject,
-                    files = files,
-                    changes = changes,
-                    onOpenFile = onOpenFile,
-                    onRefresh = onRefresh,
-                )
-                CodeSubTab.LIVE_EDITS -> LiveAiEditsView(
-                    changes = changes,
-                    onUndoChanges = onUndoChanges,
-                    onKeepChanges = onKeepChanges,
-                    onUndoFileChange = onUndoFileChange,
-                    onKeepFileChange = onKeepFileChange,
-                )
-                CodeSubTab.TERMINAL -> terminalScreen()
+        val isExpanded = windowSizeClass.windowWidthSizeClass == WindowWidthSizeClass.EXPANDED
+
+        if (isExpanded && selectedSubTab == CodeSubTab.TREE) {
+            Row(Modifier.weight(1f).fillMaxWidth()) {
+                Box(Modifier.weight(1f)) {
+                    FileTreeView(
+                        activeProject = activeProject,
+                        files = files,
+                        loading = loading,
+                        changes = changes,
+                        suggestedProjectRoot = suggestedProjectRoot,
+                        onRefresh = onRefresh,
+                        onOpenFile = onOpenFile,
+                        onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
+                        onExport = onExport,
+                    )
+                }
+                VerticalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Box(Modifier.weight(1.5f).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+                    // Selection placeholder or details
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(32.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Default.Description, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
+                        Spacer(Modifier.height(16.dp))
+                        Text("Select a file to preview its content", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        } else {
+            Box(Modifier.weight(1f)) {
+                when (selectedSubTab) {
+                    CodeSubTab.TREE -> FileTreeView(
+                        activeProject = activeProject,
+                        files = files,
+                        loading = loading,
+                        changes = changes,
+                        suggestedProjectRoot = suggestedProjectRoot,
+                        onRefresh = onRefresh,
+                        onOpenFile = onOpenFile,
+                        onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
+                        onExport = onExport,
+                    )
+                    CodeSubTab.ARTIFACTS -> ProjectArtifactsView(
+                        project = activeProject,
+                        files = files,
+                        changes = changes,
+                        onOpenFile = onOpenFile,
+                        onRefresh = onRefresh,
+                    )
+                    CodeSubTab.LIVE_EDITS -> LiveAiEditsView(
+                        changes = changes,
+                        onUndoChanges = onUndoChanges,
+                        onKeepChanges = onKeepChanges,
+                        onUndoFileChange = onUndoFileChange,
+                        onKeepFileChange = onKeepFileChange,
+                    )
+                    CodeSubTab.TERMINAL -> terminalScreen()
+                }
             }
         }
     }

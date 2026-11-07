@@ -185,6 +185,8 @@ fun SettingsScreen(
     onSetConfirmDestructiveCommands: (Boolean) -> Unit = {},
     onSetConfirmFileDeletion: (Boolean) -> Unit = {},
     onSetConfirmGitPush: (Boolean) -> Unit = {},
+    onSetPreferredBackend: (String) -> Unit = {},
+    onSetNextRuntimeVersion: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
@@ -892,11 +894,94 @@ fun SettingsScreen(
                     onClick = { toggle(SettingsSection.RUNTIME) },
                 ) {
                     RuntimeInfoRow("Architecture", "ARM64 (aarch64)")
-                    RuntimeInfoRow("Environment", "Ubuntu 20.04 PRoot")
+                    RuntimeInfoRow("Current Rootfs", "Ubuntu 20.04 Focal Fossa")
+                    RuntimeInfoRow("Available Upgrade", state.nextRuntimeVersion + " (glibc 2.39+)")
+                    RuntimeInfoRow(
+                        "KVM Acceleration",
+                        if (state.supportsAvfBackend) "Hardware AVF (/dev/kvm) Available" else "Userspace PRoot Fallback",
+                    )
                     RuntimeInfoRow(
                         "Active agent",
                         state.agentKind.title + if (state.installedAgentVersions.containsKey(state.agentKind)) "" else " · Not installed",
                     )
+                    Spacer(Modifier.height(6.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Linux OS Rootfs Version",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (state.nextRuntimeVersion.contains("20.04")) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, if (state.nextRuntimeVersion.contains("20.04")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.weight(1f).clickable { onSetNextRuntimeVersion("Ubuntu 20.04 LTS (Focal)") },
+                        ) {
+                            Column(Modifier.padding(10.dp)) {
+                                Text("Ubuntu 20.04", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("Focal · Standard glibc 2.31", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (state.nextRuntimeVersion.contains("24.04")) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, if (state.nextRuntimeVersion.contains("24.04")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.weight(1f).clickable { onSetNextRuntimeVersion("Ubuntu 24.04 LTS (Noble Numbat)") },
+                        ) {
+                            Column(Modifier.padding(10.dp)) {
+                                Text("Ubuntu 24.04 LTS", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PocketGreen)
+                                Text("Noble · glibc 2.39+ · Py 3.12", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Execution Backend Subsystem",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        listOf("PRoot", "AVF", "Native").forEach { backend ->
+                            val isSelected = state.preferredBackend.equals(backend, ignoreCase = true)
+                            val isAvf = backend == "AVF"
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.weight(1f).clickable { onSetPreferredBackend(backend) },
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Text(
+                                        if (isAvf) "AVF MicroVM" else backend,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 11.sp,
+                                    )
+                                    Text(
+                                        if (isAvf) (if (state.supportsAvfBackend) "/dev/kvm Ready" else "Requires KVM") else if (backend == "PRoot") "Userspace" else "Chroot",
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     Text(
                         "Installed agents",

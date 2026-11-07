@@ -24,6 +24,8 @@ import com.jarves.mh.ui.LocaleHelper
 import com.jarves.mh.ui.MainViewModel
 import com.jarves.mh.ui.PocketDevApp
 import com.jarves.mh.ui.theme.PocketTheme
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.window.core.layout.WindowSizeClass
 
 class MainActivity : ComponentActivity() {
     private var appliedLanguageCode: String? = null
@@ -59,8 +61,9 @@ class MainActivity : ComponentActivity() {
                 LocalLayoutDirection provides layoutDirection,
                 LocalActivityResultRegistryOwner provides this,
             ) {
+                val windowSizeClass = currentWindowAdaptiveInfo().windowSizeClass
                 PocketTheme(themeMode = state.themeMode, colorTheme = state.colorTheme) {
-                    PocketDevApp(vm)
+                    PocketDevApp(vm, windowSizeClass)
                 }
             }
         }

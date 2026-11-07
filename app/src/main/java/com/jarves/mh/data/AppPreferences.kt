@@ -108,6 +108,30 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("interrupted_task_chat_id", null)
         set(value) { preferences.edit().putString("interrupted_task_chat_id", value).apply() }
 
+    var preferredBackend: String
+        get() = preferences.getString("preferred_backend", "PRoot") ?: "PRoot"
+        set(value) { preferences.edit().putString("preferred_backend", value).apply() }
+
+    var nextRuntimeVersion: String
+        get() = preferences.getString("next_runtime_version", "Ubuntu 24.04 LTS (Noble Numbat)") ?: "Ubuntu 24.04 LTS (Noble Numbat)"
+        set(value) { preferences.edit().putString("next_runtime_version", value).apply() }
+
+    var localAiModelPath: String
+        get() = preferences.getString("local_ai_model_path", "") ?: ""
+        set(value) { preferences.edit().putString("local_ai_model_path", value).apply() }
+
+    var localAiThreads: Int
+        get() = preferences.getInt("local_ai_threads", 4)
+        set(value) { preferences.edit().putInt("local_ai_threads", value).apply() }
+
+    var localTtsEngine: String
+        get() = preferences.getString("local_tts_engine", "System Neural Fallback") ?: "System Neural Fallback"
+        set(value) { preferences.edit().putString("local_tts_engine", value).apply() }
+
+    var hasPromptedUbuntu24Upgrade: Boolean
+        get() = preferences.getBoolean("has_prompted_ubuntu_24_upgrade", false)
+        set(value) { preferences.edit().putBoolean("has_prompted_ubuntu_24_upgrade", value).apply() }
+
     var terminalSkinStyle: String
         get() = preferences.getString("terminal_skin_style", "MINIMAL") ?: "MINIMAL"
         set(value) { preferences.edit().putString("terminal_skin_style", value).apply() }

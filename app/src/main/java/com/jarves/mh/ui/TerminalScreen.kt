@@ -104,6 +104,8 @@ import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.window.core.layout.WindowSizeClass
+import androidx.window.core.layout.WindowWidthSizeClass
 
 private const val ASCII_BANNER = """
  __  __       _     _ _        _    _                                
@@ -156,9 +158,11 @@ private fun interpolateColor(colors: List<Long>, ratio: Float): Color {
     )
 }
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TerminalScreen(
+    windowSizeClass: WindowSizeClass? = null,
     lines: List<TerminalOutputLine>,
     isRunning: Boolean,
     onRun: (String) -> Unit,
@@ -313,6 +317,18 @@ fun TerminalScreen(
     val selectedFontFamily = when (skinConfig.fontFamily) {
         TerminalFontFamily.MONOSPACE, TerminalFontFamily.CODE -> FontFamily.Monospace
         TerminalFontFamily.SANS -> FontFamily.SansSerif
+    }
+    
+    val baseFontSize = skinConfig.fontSizeSp.sp
+    val responsiveFontSize = if (windowSizeClass?.windowWidthSizeClass == WindowWidthSizeClass.EXPANDED) {
+        (skinConfig.fontSizeSp + 2).sp
+    } else {
+        baseFontSize
+    }
+    val responsiveLineHeight = if (windowSizeClass?.windowWidthSizeClass == WindowWidthSizeClass.EXPANDED) {
+        (skinConfig.lineHeightSp + 2).sp
+    } else {
+        skinConfig.lineHeightSp.sp
     }
 
     Scaffold(
@@ -475,8 +491,8 @@ fun TerminalScreen(
                                         Text(
                                             text = asciiBanner,
                                             fontFamily = FontFamily.Monospace,
-                                            fontSize = (skinConfig.fontSizeSp * 0.85f).sp,
-                                            lineHeight = (skinConfig.lineHeightSp * 0.85f).sp,
+                                            fontSize = (if (windowSizeClass?.windowWidthSizeClass == WindowWidthSizeClass.EXPANDED) skinConfig.fontSizeSp else skinConfig.fontSizeSp * 0.85f).sp,
+                                            lineHeight = (if (windowSizeClass?.windowWidthSizeClass == WindowWidthSizeClass.EXPANDED) skinConfig.lineHeightSp else skinConfig.lineHeightSp * 0.85f).sp,
                                             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                                         )
                                     }
@@ -502,8 +518,8 @@ fun TerminalScreen(
                                             Text(
                                                 text = sanitizeTerminalOutput(item.output),
                                                 fontFamily = selectedFontFamily,
-                                                fontSize = skinConfig.fontSizeSp.sp,
-                                                lineHeight = skinConfig.lineHeightSp.sp,
+                                                fontSize = responsiveFontSize,
+                                                lineHeight = responsiveLineHeight,
                                                 color = if (item.exitCode != 0) MaterialTheme.colorScheme.error else outputTextColor,
                                                 modifier = Modifier.padding(start = 8.dp),
                                             )
@@ -524,8 +540,8 @@ fun TerminalScreen(
                                         Text(
                                             sanitizeTerminalOutput(liveOutput),
                                             fontFamily = selectedFontFamily,
-                                            fontSize = skinConfig.fontSizeSp.sp,
-                                            lineHeight = skinConfig.lineHeightSp.sp,
+                                            fontSize = responsiveFontSize,
+                                            lineHeight = responsiveLineHeight,
                                             color = outputTextColor,
                                         )
                                     }
@@ -607,8 +623,8 @@ fun TerminalScreen(
                                 cursorBrush = SolidColor(promptColor),
                                 textStyle = androidx.compose.ui.text.TextStyle(
                                     fontFamily = selectedFontFamily,
-                                    fontSize = skinConfig.fontSizeSp.sp,
-                                    lineHeight = skinConfig.lineHeightSp.sp,
+                                    fontSize = responsiveFontSize,
+                                    lineHeight = responsiveLineHeight,
                                     fontWeight = FontWeight.SemiBold,
                                     color = commandTextColor,
                                 ),

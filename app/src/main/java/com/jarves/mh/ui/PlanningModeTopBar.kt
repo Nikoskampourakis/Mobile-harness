@@ -47,16 +47,22 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.Canvas
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -209,6 +215,9 @@ fun PlanningGoalsModalSheet(
     val totalCount = goals.size
     val progressFraction = if (totalCount > 0) completedCount.toFloat() / totalCount.toFloat() else 0f
 
+    var hideCompleted by rememberSaveable { mutableStateOf(false) }
+    val filteredGoals = if (hideCompleted) goals.filter { !it.isCompleted } else goals
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -225,7 +234,7 @@ fun PlanningGoalsModalSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     Box(
                         modifier = Modifier
                             .size(36.dp)
@@ -255,8 +264,17 @@ fun PlanningGoalsModalSheet(
                     }
                 }
 
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { hideCompleted = !hideCompleted }) {
+                        Icon(
+                            imageVector = if (hideCompleted) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (hideCompleted) "Show completed" else "Hide completed",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
                 }
             }
 
@@ -277,7 +295,7 @@ fun PlanningGoalsModalSheet(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(goals, key = { it.id }) { goal ->
+                items(filteredGoals, key = { it.id }) { goal ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -328,12 +346,17 @@ fun PlanningGoalsModalSheet(
                             Spacer(Modifier.width(12.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = goal.title,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.5.sp,
-                                    color = if (goal.isCompleted) PocketGreen else MaterialTheme.colorScheme.onSurface,
-                                )
+                                Box(contentAlignment = Alignment.CenterStart) {
+                                    Text(
+                                        text = goal.title,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.5.sp,
+                                        color = if (goal.isCompleted) PocketGreen else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    if (goal.isCompleted) {
+                                        ScribbleOverlay(Modifier.matchParentSize())
+                                    }
+                                }
                                 if (goal.description.isNotBlank()) {
                                     Spacer(Modifier.height(2.dp))
                                     Text(
@@ -362,5 +385,30 @@ fun PlanningGoalsModalSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ScribbleOverlay(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val color = Color.Gray.copy(alpha = 0.5f)
+        
+        // A simple hand-drawn looking scribble line
+        drawLine(
+            color = color,
+            start = Offset(0f, h * 0.5f),
+            end = Offset(w, h * 0.55f),
+            strokeWidth = 2.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.1f, h * 0.45f),
+            end = Offset(w * 0.9f, h * 0.6f),
+            strokeWidth = 1.5.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round
+        )
     }
 }

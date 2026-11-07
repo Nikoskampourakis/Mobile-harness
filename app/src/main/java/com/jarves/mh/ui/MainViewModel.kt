@@ -487,6 +487,11 @@ data class AppUiState(
     val projectSecrets: List<ProjectSecretEntry> = emptyList(),
     val showProjectSecretsModal: Boolean = false,
     val pendingApiKeyRequest: Pair<String, String>? = null,
+    // Architectural Prep for Ubuntu 24.04 & AVF
+    val nextRuntimeVersion: String = "Ubuntu 24.04 LTS (Noble Numbat)",
+    val supportsAvfBackend: Boolean = false,
+    val preferredBackend: String = "PRoot", // PRoot, AVF, or Native
+    val showUbuntu24UpgradeDialog: Boolean = false,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -605,6 +610,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             selectedDevStacks = preferences.selectedDevStacks.mapNotNull { name ->
                 runCatching { DevStack.valueOf(name) }.getOrNull()
             }.toSet() + DevStack.WEB,
+            nextRuntimeVersion = preferences.nextRuntimeVersion,
+            preferredBackend = preferences.preferredBackend,
+            supportsAvfBackend = java.io.File("/dev/kvm").exists() || java.io.File("/dev/pkvm").exists(),
+            showUbuntu24UpgradeDialog = !preferences.hasPromptedUbuntu24Upgrade && preferences.runtimeSetupComplete,
         ),
     )
 
@@ -6674,6 +6683,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setConfirmGitPush(enabled: Boolean) {
         preferences.confirmGitPush = enabled
         _state.update { it.copy(confirmGitPush = enabled) }
+    }
+
+    fun setPreferredBackend(backend: String) {
+        preferences.preferredBackend = backend
+        _state.update { it.copy(preferredBackend = backend) }
+    }
+
+    fun setNextRuntimeVersion(version: String) {
+        preferences.nextRuntimeVersion = version
+        _state.update { it.copy(nextRuntimeVersion = version) }
+    }
+
+    fun setLocalTtsEngine(engine: String) {
+        preferences.localTtsEngine = engine
+    }
+
+    fun dismissUbuntu24UpgradePrompt() {
+        preferences.hasPromptedUbuntu24Upgrade = true
+        _state.update { it.copy(showUbuntu24UpgradeDialog = false) }
+    }
+
+    fun acceptUbuntu24Upgrade() {
+        preferences.hasPromptedUbuntu24Upgrade = true
+        preferences.nextRuntimeVersion = "Ubuntu 24.04 LTS (Noble Numbat)"
+        _state.update { it.copy(showUbuntu24UpgradeDialog = false, nextRuntimeVersion = "Ubuntu 24.04 LTS (Noble Numbat)") }
+        cleanReinstallLinuxRuntime()
     }
 
     fun submitClarificationAnswers(requestId: String, answers: Map<String, String>) {
